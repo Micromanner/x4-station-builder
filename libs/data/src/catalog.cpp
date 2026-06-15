@@ -6,9 +6,10 @@
 #include <sstream>
 
 namespace x4sb {
-namespace {
 
 using nlohmann::json;
+
+namespace {
 
 Category parseCategory(const std::string& s) {
   if (s == "production") return Category::Production;
@@ -32,6 +33,22 @@ Quat readQuat(const json& j) {
   return {};
 }
 
+std::string categoryToString(Category c) {
+  switch (c) {
+    case Category::Production: return "production";
+    case Category::Storage: return "storage";
+    case Category::Habitat: return "habitat";
+    case Category::Dock: return "dock";
+    case Category::Defense: return "defense";
+    case Category::Connector: return "connector";
+    case Category::Other: break;
+  }
+  return "other";
+}
+
+json writeVec3(const Vec3& v) { return json::array({v.x, v.y, v.z}); }
+json writeQuat(const Quat& q) { return json::array({q.w, q.x, q.y, q.z}); }
+
 }  // namespace
 
 // Tolerant parse of the catalog schema. The exact schema is finalized once the
@@ -47,6 +64,9 @@ ModuleCatalog ModuleCatalog::loadFromJson(const std::string& text) {
     d.name = m.value("name", std::string{});
     d.faction = m.value("faction", std::string{});
     d.category = parseCategory(m.value("category", std::string{"other"}));
+    d.wareId = m.value("wareId", std::string{});
+    d.nameRef = m.value("nameRef", std::string{});
+    d.playerBuildable = m.value("playerBuildable", true);
 
     if (m.contains("aabb")) {
       const json& bb = m.at("aabb");
@@ -95,6 +115,49 @@ std::optional<ModuleCatalog> ModuleCatalog::loadFromFile(const std::string& path
 const ModuleDef* ModuleCatalog::find(const std::string& macroId) const {
   const auto it = modules_.find(macroId);
   return it == modules_.end() ? nullptr : &it->second;
+}
+
+std::string toCatalogJson(const std::vector<ModuleDef>& modules) {
+  json mods = json::array();
+  for (const ModuleDef& d : modules) {
+    json m;
+    m["id"] = d.id;
+    m["name"] = d.name;
+    m["wareId"] = d.wareId;
+    m["nameRef"] = d.nameRef;
+    m["faction"] = d.faction;
+    m["category"] = categoryToString(d.category);
+    m["playerBuildable"] = d.playerBuildable;
+    m["aabb"] = {{"min", writeVec3(d.aabb.min)}, {"max", writeVec3(d.aabb.max)}};
+
+    json pts = json::array();
+    for (const ConnectionPoint& cp : d.connectionPoints) {
+      pts.push_back({{"id", cp.id},
+                     {"localPosition", writeVec3(cp.localPosition)},
+                     {"localRotation", writeQuat(cp.localRotation)},
+                     {"type", cp.type}});
+    }
+    m["connectionPoints"] = std::move(pts);
+
+    json refs = json::array();
+    for (const MeshRef& r : d.meshRefs) {
+      refs.push_back({{"gltfPath", r.gltfPath},
+                      {"localTransform",
+                       {{"position", writeVec3(r.localTransform.position)},
+                        {"rotation", writeQuat(r.localTransform.rotation)}}}});
+    }
+    m["meshRefs"] = std::move(refs);
+    mods.push_back(std::move(m));
+  }
+  return json{{"modules", std::move(mods)}}.dump(2);
+}
+
+bool writeCatalogFile(const std::vector<ModuleDef>& modules, const std::string& path) {
+  std::ofstream out(path);
+  if (!out) return false;
+  out << toCatalogJson(modules);
+  out.flush();
+  return out.good();
 }
 
 }  // namespace x4sb

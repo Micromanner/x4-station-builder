@@ -6,9 +6,11 @@
 // wrapper over the shared libs/assetpipe logic; the editor drives the same code
 // behind its first-run wizard.
 #include "x4sb/archive/archive.hpp"
+#include "x4sb/assetpipe/catalogbuild.hpp"
 #include "x4sb/assetpipe/component.hpp"
 #include "x4sb/assetpipe/gltf.hpp"
 #include "x4sb/assetpipe/xmf.hpp"
+#include "x4sb/data/catalog.hpp"
 
 #include <filesystem>
 #include <iostream>
@@ -31,7 +33,8 @@ void printUsage(const char* exe) {
             << "Converts a station module's .xmf part meshes to glTF and reports its\n"
             << "snap connectors.\n"
             << "  --out        output asset cache (default: " << kDefaultOut << ")\n"
-            << "  --component  module component XML (default: " << kDefaultComponent << ")\n";
+            << "  --component  module component XML (default: " << kDefaultComponent << ")\n"
+            << "  --catalog    build the full module catalog.json (ignores --component)\n";
 }
 
 // Replace path separators so a logical path becomes a flat output filename.
@@ -125,11 +128,44 @@ int run(const std::string& x4Path, const std::string& outDir, const std::string&
   return 0;
 }
 
+int runCatalog(const std::string& x4Path, const std::string& outDir) {
+  Archive archive;
+  const int cats = archive.addInstall(x4Path);
+  if (cats == 0) {
+    std::cerr << "error: no catalogs found under " << x4Path << "\n";
+    return 1;
+  }
+  std::cout << "indexed " << archive.fileCount() << " files from " << cats << " catalogs\n";
+
+  const ExtractFn extract = [&archive](const std::string& path) { return archive.extract(path); };
+  const CatalogBuildResult res = buildModuleCatalog(extract, archive.sources());
+  if (res.modules.empty()) {
+    std::cerr << "error: no modules resolved (is libraries/wares.xml present?)\n";
+    return 1;
+  }
+
+  std::error_code ec;
+  fs::create_directories(outDir, ec);
+  const std::string outPath = (fs::path(outDir) / "catalog.json").string();
+  if (!writeCatalogFile(res.modules, outPath)) {
+    std::cerr << "error: failed to write " << outPath << "\n";
+    return 1;
+  }
+
+  std::cout << "wrote " << res.modules.size() << " modules -> " << outPath << "\n";
+  if (!res.skipped.empty()) {
+    std::cout << "skipped " << res.skipped.size() << " modules:\n";
+    for (const std::string& s : res.skipped) std::cout << "  " << s << "\n";
+  }
+  return 0;
+}
+
 }  // namespace
 
 int main(int argc, char** argv) {
   std::vector<std::string> args(argv + 1, argv + argc);
   std::string x4Path, outDir = kDefaultOut, componentPath = kDefaultComponent;
+  bool catalog = false;
 
   for (std::size_t i = 0; i < args.size(); ++i) {
     if (args[i] == "--x4" && i + 1 < args.size()) {
@@ -138,6 +174,8 @@ int main(int argc, char** argv) {
       outDir = args[++i];
     } else if (args[i] == "--component" && i + 1 < args.size()) {
       componentPath = args[++i];
+    } else if (args[i] == "--catalog") {
+      catalog = true;
     } else if (args[i] == "-h" || args[i] == "--help") {
       printUsage(argv[0]);
       return 0;
@@ -148,5 +186,6 @@ int main(int argc, char** argv) {
     printUsage(argv[0]);
     return args.empty() ? 0 : 2;
   }
+  if (catalog) return runCatalog(x4Path, outDir);
   return run(x4Path, outDir, componentPath);
 }

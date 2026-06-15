@@ -30,10 +30,13 @@ struct MeshRef {
 };
 
 struct ModuleDef {
-  std::string id;  // macro id
-  std::string name;
-  std::string faction;
+  std::string id;       // macro name (catalog key; plans reference modules by macro)
+  std::string name;     // display name (empty until the localization pass)
+  std::string wareId;   // e.g. "module_arg_prod_foodrations_01"
+  std::string nameRef;  // raw localization ref "{page,id}"
+  std::string faction;  // makerrace
   Category category{Category::Other};
+  bool playerBuildable{true};
   std::vector<ConnectionPoint> connectionPoints;
   std::vector<MeshRef> meshRefs;
   AABB aabb{};  // derived bounding box, in module-local space

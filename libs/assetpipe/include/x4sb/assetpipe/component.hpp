@@ -45,6 +45,11 @@ struct ComponentGeometry {
 // Parse the geometry source folder and visual part list from a component XML.
 ComponentGeometry parseComponentGeometry(const std::string& componentXml);
 
+// The module's overall AABB in module-local space: the union of each visual
+// part's <size>/<max> half-extents about <size>/<center>, transformed by the
+// part's mount offset. Returns a zero box if no part declares a <size>.
+[[nodiscard]] AABB moduleAabb(const std::string& componentXml);
+
 // Identity parsed from a macro XML (<macros>/<macro>).
 struct MacroInfo {
   std::string macroName;               // e.g. "struct_arg_cross_01_macro"

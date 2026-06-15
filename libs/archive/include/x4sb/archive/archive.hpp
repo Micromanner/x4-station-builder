@@ -59,6 +59,10 @@ class Archive {
   bool contains(const std::string& path) const { return index_.count(path) != 0; }
   std::size_t fileCount() const { return index_.size(); }
 
+  // Returns the distinct logical-path prefixes indexed so far, in first-seen
+  // order. `""` for the base game; `"extensions/<dlc>/"` for each DLC.
+  [[nodiscard]] const std::vector<std::string>& sources() const { return sources_; }
+
  private:
   struct Source {
     std::string datPath;
@@ -66,6 +70,7 @@ class Archive {
     std::uint64_t size{0};
   };
   std::unordered_map<std::string, Source> index_;  // logical path -> .dat slice
+  std::vector<std::string> sources_;               // distinct prefixes, load order
 };
 
 }  // namespace x4sb

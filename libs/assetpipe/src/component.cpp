@@ -1,9 +1,10 @@
 #include "x4sb/assetpipe/component.hpp"
 
+#include "strutil.hpp"
+
 #include <pugixml.hpp>
 
 #include <algorithm>
-#include <cctype>
 #include <sstream>
 
 namespace x4sb {
@@ -21,12 +22,9 @@ std::string normalizeTags(const std::string& raw) {
   return out;
 }
 
-bool hasToken(const std::string& tags, const char* token) {
-  std::istringstream in(tags);
-  std::string tok;
-  while (in >> tok)
-    if (tok == token) return true;
-  return false;
+Vec3 readXyz(const pugi::xml_node& n) {
+  return {n.attribute("x").as_double(), n.attribute("y").as_double(),
+          n.attribute("z").as_double()};
 }
 
 Transform parseOffset(const pugi::xml_node& conn) {
@@ -65,7 +63,7 @@ std::vector<ComponentConnection> parseComponentConnections(const std::string& co
   return out;
 }
 
-bool isSnapConnection(const ComponentConnection& c) { return hasToken(c.tags, "snap"); }
+bool isSnapConnection(const ComponentConnection& c) { return detail::hasToken(c.tags, "snap"); }
 
 std::vector<ConnectionPoint> snapConnectionPoints(const std::string& componentXml) {
   std::vector<ConnectionPoint> out;
@@ -93,7 +91,7 @@ ComponentGeometry parseComponentGeometry(const std::string& componentXml) {
 
   for (const pugi::xml_node c : comp.child("connections").children("connection")) {
     const std::string tags = normalizeTags(c.attribute("tags").as_string());
-    if (!hasToken(tags, "part")) continue;
+    if (!detail::hasToken(tags, "part")) continue;
     const Transform offset = parseOffset(c);
     for (const pugi::xml_node part : c.child("parts").children("part")) {
       ComponentPart cp;
@@ -103,6 +101,45 @@ ComponentGeometry parseComponentGeometry(const std::string& componentXml) {
     }
   }
   return geo;
+}
+
+AABB moduleAabb(const std::string& componentXml) {
+  AABB box;
+  bool any = false;
+  pugi::xml_document doc;
+  if (!doc.load_string(componentXml.c_str())) return box;
+
+  const pugi::xml_node comp = doc.child("components").child("component");
+  for (const pugi::xml_node c : comp.child("connections").children("connection")) {
+    const std::string tags = normalizeTags(c.attribute("tags").as_string());
+    if (!detail::hasToken(tags, "part")) continue;
+    if (detail::hasToken(tags, "nocollision")) continue;  // detail/anim/fx parts overstate their size box
+    const Transform offset = parseOffset(c);
+    for (const pugi::xml_node part : c.child("parts").children("part")) {
+      const pugi::xml_node size = part.child("size");
+      if (!size) continue;
+      const Vec3 half = readXyz(size.child("max"));
+      const Vec3 ctr = readXyz(size.child("center"));
+      for (int sx = -1; sx <= 1; sx += 2) {
+        for (int sy = -1; sy <= 1; sy += 2) {
+          for (int sz = -1; sz <= 1; sz += 2) {
+            const Vec3 corner{ctr.x + half.x * static_cast<double>(sx),
+                              ctr.y + half.y * static_cast<double>(sy),
+                              ctr.z + half.z * static_cast<double>(sz)};
+            const Vec3 world = apply(offset, corner);
+            if (!any) {
+              box.min = world;
+              box.max = world;
+              any = true;
+            } else {
+              expand(box, world);
+            }
+          }
+        }
+      }
+    }
+  }
+  return box;
 }
 
 Category categoryFromClass(const std::string& className) {

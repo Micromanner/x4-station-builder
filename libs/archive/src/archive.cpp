@@ -93,6 +93,10 @@ bool Archive::addCatalog(const std::string& catPath, const std::string& logicalP
   const CatIndex idx = CatIndex::parse(text);
   for (const auto& e : idx.entries())
     index_[logicalPrefix + e.path] = Source{datPath, e.offset, e.size};  // later cats overwrite
+
+  // Record this prefix once (dedup: linear scan; there are only a handful).
+  if (std::find(sources_.begin(), sources_.end(), logicalPrefix) == sources_.end())
+    sources_.push_back(logicalPrefix);
   return true;
 }
 

@@ -16,7 +16,17 @@ const char* kComponentXml = R"(<?xml version="1.0"?>
     <source geometry="assets/test/test_cube_01_data"/>
     <connections>
       <connection name="Connection01" tags="part  ">
-        <offset/>
+        <offset>
+          <position x="100" y="0" z="0"/>
+        </offset>
+        <parts>
+          <part name="part_main">
+            <size>
+              <max x="10" y="20" z="30"/>
+              <center x="1" y="2" z="3"/>
+            </size>
+          </part>
+        </parts>
       </connection>
       <connection name="ConnectionSnap001" tags="snap ">
         <offset>
@@ -43,6 +53,26 @@ const char* kMacroXml = R"(<?xml version="1.0"?>
     </properties>
   </macro>
 </macros>)";
+
+const char* kNoCollisionComponentXml = R"(<?xml version="1.0"?>
+<components>
+  <component name="test_nc_01" class="production">
+    <connections>
+      <connection name="Structural" tags="part  ">
+        <offset><position x="0" y="0" z="0"/></offset>
+        <parts><part name="part_main">
+          <size><max x="100" y="50" z="100"/><center x="0" y="0" z="0"/></size>
+        </part></parts>
+      </connection>
+      <connection name="Detail" tags="part detail_s nocollision  ">
+        <offset/>
+        <parts><part name="detail_big">
+          <size><max x="9999" y="9999" z="9999"/><center x="0" y="0" z="0"/></size>
+        </part></parts>
+      </connection>
+    </connections>
+  </component>
+</components>)";
 
 }  // namespace
 
@@ -93,4 +123,28 @@ TEST_CASE("categoryFromClass maps the X4 station-module classes") {
   CHECK(categoryFromClass("defence") == Category::Defense);
   CHECK(categoryFromClass("connectionmodule") == Category::Connector);
   CHECK(categoryFromClass("somethingelse") == Category::Other);
+}
+
+TEST_CASE("moduleAabb unions part size boxes at their mount offsets") {
+  // part-local box = center +/- max -> x[-9,11] y[-18,22] z[-27,33];
+  // mounted at offset (100,0,0) -> x[91,111] y[-18,22] z[-27,33].
+  const AABB box = moduleAabb(kComponentXml);
+  CHECK(box.min.x == doctest::Approx(91));
+  CHECK(box.max.x == doctest::Approx(111));
+  CHECK(box.min.y == doctest::Approx(-18));
+  CHECK(box.max.y == doctest::Approx(22));
+  CHECK(box.min.z == doctest::Approx(-27));
+  CHECK(box.max.z == doctest::Approx(33));
+}
+
+TEST_CASE("moduleAabb ignores nocollision parts") {
+  // Only the collidable 'Structural' part counts; the huge nocollision 'Detail'
+  // part (max 9999) must be excluded from the collision AABB.
+  const AABB box = moduleAabb(kNoCollisionComponentXml);
+  CHECK(box.min.x == doctest::Approx(-100));
+  CHECK(box.max.x == doctest::Approx(100));
+  CHECK(box.min.y == doctest::Approx(-50));
+  CHECK(box.max.y == doctest::Approx(50));
+  CHECK(box.min.z == doctest::Approx(-100));
+  CHECK(box.max.z == doctest::Approx(100));
 }

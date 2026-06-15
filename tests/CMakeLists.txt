@@ -8,7 +8,11 @@ add_executable(x4sb_tests
   assetpipe_test.cpp
   xmf_test.cpp
   plan_test.cpp
-  platform_test.cpp)
+  catalog_test.cpp
+  platform_test.cpp
+  moduleindex_test.cpp
+  wares_test.cpp
+  catalogbuild_test.cpp)
 
 target_link_libraries(x4sb_tests PRIVATE
   doctest::doctest

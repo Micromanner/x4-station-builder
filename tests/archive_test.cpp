@@ -63,3 +63,42 @@ TEST_CASE("Archive extracts bytes from a synthetic cat/dat pair; later catalog w
 
   fs::remove_all(dir);
 }
+
+TEST_CASE("Archive::sources() returns distinct prefixes in first-seen order") {
+  namespace fs = std::filesystem;
+  const fs::path dir = fs::temp_directory_path() / "x4sb_sources_test";
+  fs::remove_all(dir);
+  fs::create_directories(dir);
+
+  auto writePair = [&](const fs::path& catPath, const fs::path& datPath,
+                       const std::string& cat, const std::string& dat) {
+    std::ofstream(catPath, std::ios::binary) << cat;
+    std::ofstream(datPath, std::ios::binary) << dat;
+  };
+
+  // Base catalog 01
+  writePair(dir / "01.cat", dir / "01.dat", "foo.xml 3 1 aa\n", "foo");
+  // Base catalog 02 — same prefix "", must NOT produce a second "" entry
+  writePair(dir / "02.cat", dir / "02.dat", "bar.xml 3 1 bb\n", "bar");
+  // DLC catalog
+  const fs::path dlcDir = dir / "dlc";
+  fs::create_directories(dlcDir);
+  writePair(dlcDir / "01.cat", dlcDir / "01.dat", "mod.xml 3 1 cc\n", "mod");
+
+  Archive ar;
+  CHECK(ar.addCatalog((dir / "01.cat").string(), ""));
+  CHECK(ar.addCatalog((dir / "02.cat").string(), ""));
+  CHECK(ar.addCatalog((dlcDir / "01.cat").string(), "extensions/ego_dlc_test/"));
+
+  const auto& srcs = ar.sources();
+  REQUIRE(srcs.size() == 2);
+  CHECK(srcs[0] == "");
+  CHECK(srcs[1] == "extensions/ego_dlc_test/");
+
+  // Adding another catalog under the DLC prefix must NOT add a duplicate.
+  writePair(dlcDir / "02.cat", dlcDir / "02.dat", "extra.xml 5 1 dd\n", "extra!");
+  CHECK(ar.addCatalog((dlcDir / "02.cat").string(), "extensions/ego_dlc_test/"));
+  CHECK(ar.sources().size() == 2);
+
+  fs::remove_all(dir);
+}
