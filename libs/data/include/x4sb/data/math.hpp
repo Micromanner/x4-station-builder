@@ -1,0 +1,60 @@
+#pragma once
+// Minimal, render-free math primitives shared across all libs.
+// Deliberately independent of raylib so the logic units test headlessly;
+// conversion to raylib's types happens only inside apps/editor.
+#include <cmath>
+
+namespace x4sb {
+
+struct Vec3 {
+  double x{0}, y{0}, z{0};
+};
+
+inline Vec3 operator+(Vec3 a, Vec3 b) { return {a.x + b.x, a.y + b.y, a.z + b.z}; }
+inline Vec3 operator-(Vec3 a, Vec3 b) { return {a.x - b.x, a.y - b.y, a.z - b.z}; }
+inline Vec3 operator*(Vec3 a, double s) { return {a.x * s, a.y * s, a.z * s}; }
+inline double dot(Vec3 a, Vec3 b) { return a.x * b.x + a.y * b.y + a.z * b.z; }
+inline Vec3 cross(Vec3 a, Vec3 b) {
+  return {a.y * b.z - a.z * b.y, a.z * b.x - a.x * b.z, a.x * b.y - a.y * b.x};
+}
+inline double length(Vec3 a) { return std::sqrt(dot(a, a)); }
+
+// Unit quaternion (w + xi + yj + zk). Default is identity.
+struct Quat {
+  double w{1}, x{0}, y{0}, z{0};
+};
+
+inline Quat operator*(Quat a, Quat b) {
+  return {
+      a.w * b.w - a.x * b.x - a.y * b.y - a.z * b.z, a.w * b.x + a.x * b.w + a.y * b.z - a.z * b.y,
+      a.w * b.y - a.x * b.z + a.y * b.w + a.z * b.x, a.w * b.z + a.x * b.y - a.y * b.x + a.z * b.w};
+}
+inline Quat conjugate(Quat q) { return {q.w, -q.x, -q.y, -q.z}; }
+
+// Rotate a vector by a (unit) quaternion: q * (0,v) * q^-1.
+inline Vec3 rotate(Quat q, Vec3 v) {
+  const Quat p{0, v.x, v.y, v.z};
+  const Quat r = q * p * conjugate(q);
+  return {r.x, r.y, r.z};
+}
+
+// Rigid-body transform: rotate, then translate. Default is identity.
+struct Transform {
+  Vec3 position{};
+  Quat rotation{};
+};
+
+inline Vec3 apply(const Transform& t, Vec3 local) { return rotate(t.rotation, local) + t.position; }
+
+// Axis-aligned bounding box.
+struct AABB {
+  Vec3 min{};
+  Vec3 max{};
+};
+
+inline bool overlaps(const AABB& a, const AABB& b) {
+  return a.min.x <= b.max.x && a.max.x >= b.min.x && a.min.y <= b.max.y && a.max.y >= b.min.y &&
+         a.min.z <= b.max.z && a.max.z >= b.min.z;
+}
+
+}  // namespace x4sb
