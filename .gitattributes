@@ -1,0 +1,17 @@
+# ---- Line-ending normalization ----
+# Store all text files with LF in the repo, and check them out as LF everywhere.
+* text=auto eol=lf
+
+# Windows-only scripts that can misbehave with LF — keep CRLF.
+*.bat text eol=crlf
+*.cmd text eol=crlf
+
+# ---- Binary assets — never apply line-ending conversion ----
+# (Per the design doc, game assets must never be committed; this is a safety net.)
+*.xmf  binary
+*.glb  binary
+*.gltf binary
+*.png  binary
+*.jpg  binary
+*.cat  binary
+*.dat  binary

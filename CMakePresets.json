@@ -1,0 +1,62 @@
+{
+  "version": 3,
+  "cmakeMinimumRequired": { "major": 3, "minor": 20, "patch": 0 },
+  "configurePresets": [
+    {
+      "name": "core",
+      "displayName": "Core (no editor)",
+      "description": "Render-free libs + pipeline CLI + tests. No raylib download.",
+      "generator": "Ninja",
+      "binaryDir": "${sourceDir}/build/core",
+      "cacheVariables": {
+        "X4SB_BUILD_EDITOR": "OFF",
+        "X4SB_BUILD_TESTS": "ON",
+        "CMAKE_BUILD_TYPE": "Debug"
+      }
+    },
+    {
+      "name": "full",
+      "displayName": "Full (with raylib editor)",
+      "description": "Everything, including the raylib/raygui editor app.",
+      "generator": "Ninja",
+      "binaryDir": "${sourceDir}/build/full",
+      "cacheVariables": {
+        "X4SB_BUILD_EDITOR": "ON",
+        "X4SB_BUILD_TESTS": "ON",
+        "CMAKE_BUILD_TYPE": "Release"
+      }
+    },
+    {
+      "name": "core-tidy",
+      "inherits": "core",
+      "displayName": "Core + clang-tidy gate",
+      "description": "Core build with the clang-tidy gate on (requires LLVM/clang-tidy on PATH).",
+      "binaryDir": "${sourceDir}/build/core-tidy",
+      "cacheVariables": {
+        "X4SB_CLANG_TIDY": "ON"
+      }
+    }
+  ],
+  "buildPresets": [
+    { "name": "core", "configurePreset": "core" },
+    { "name": "core-tidy", "configurePreset": "core-tidy" },
+    { "name": "full", "configurePreset": "full" }
+  ],
+  "testPresets": [
+    {
+      "name": "core",
+      "configurePreset": "core",
+      "output": { "outputOnFailure": true }
+    },
+    {
+      "name": "core-tidy",
+      "configurePreset": "core-tidy",
+      "output": { "outputOnFailure": true }
+    },
+    {
+      "name": "full",
+      "configurePreset": "full",
+      "output": { "outputOnFailure": true }
+    }
+  ]
+}

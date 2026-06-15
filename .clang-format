@@ -1,0 +1,38 @@
+# Formatting for x4sb. Matches the existing house style: 2-space indent, attached
+# braces, `Type& name` / `Type* name`, and `}  // namespace x4sb` trailers.
+# Run: clang-format -i $(git ls-files '*.cpp' '*.hpp')   (CI uses --dry-run -Werror)
+---
+Language:        Cpp
+BasedOnStyle:    Google
+Standard:        c++17
+
+ColumnLimit:     100
+IndentWidth:     2
+TabWidth:        2
+UseTab:          Never
+
+PointerAlignment: Left          # Type* p, Type& r
+DerivePointerAlignment: false
+QualifierAlignment: Left         # west const: `const T`, not `T const`
+FixNamespaceComments: true      # }  // namespace x4sb
+NamespaceIndentation: None
+
+# House style keeps short bodies on one line (the "return-early" idiom):
+#   if (cond) return false;      for (auto& x : xs) f(x);
+#   Vec3 appToX4(Vec3 v) { return {v.x, v.z, v.y}; }
+AllowShortFunctionsOnASingleLine: All
+AllowShortIfStatementsOnASingleLine: WithoutElse
+AllowShortLoopsOnASingleLine: true
+
+IncludeBlocks: Regroup
+SortIncludes: CaseSensitive
+IncludeCategories:
+  # Paired header for a .cpp (handled by clang-format priority 0) comes first.
+  - Regex:    '^<x4sb/'         # this project's own public headers
+    Priority: 2
+  - Regex:    '^"'              # quoted local includes
+    Priority: 3
+  - Regex:    '^<.*\.(h|hpp)>'  # third-party library headers
+    Priority: 4
+  - Regex:    '^<'             # C++ standard library
+    Priority: 5

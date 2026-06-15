@@ -1,0 +1,72 @@
+# clang-tidy for x4sb. Targets the LLM failure modes the research flagged for C++:
+# memory/ownership (cppcoreguidelines, bugprone), stale idioms (modernize),
+# silent conversions/overflow (bugprone + compiler -Wconversion), and unchecked
+# returns (modernize-use-nodiscard). Enabled in the build via the `core-tidy`
+# preset (needs LLVM installed). Run standalone (the --extra-arg drops GCC-only
+# warning flags clang's frontend rejects; the core-tidy gate adds it automatically
+# via CMAKE_CXX_CLANG_TIDY):
+#   clang-tidy -p build/core --extra-arg=-Wno-unknown-warning-option libs/coords/src/coords.cpp
+#
+# Disabled checks are deliberate, to match the house style or cut noise: pragma-once
+# is the house include-guard style; math-missing-parentheses / magic-numbers /
+# swappable-params flood the geometry code; braces-around-statements fights the
+# return-early one-liners. Naming mirrors the code: types CamelCase, callables and
+# variables camelBack, namespaces lower_case.
+---
+Checks: >
+  -*,
+  bugprone-*,
+  cppcoreguidelines-*,
+  modernize-*,
+  performance-*,
+  portability-*,
+  readability-*,
+  misc-*,
+  clang-analyzer-*,
+  -modernize-use-trailing-return-type,
+  -readability-braces-around-statements,
+  -readability-identifier-length,
+  -readability-magic-numbers,
+  -readability-function-cognitive-complexity,
+  -cppcoreguidelines-avoid-magic-numbers,
+  -cppcoreguidelines-non-private-member-variables-in-classes,
+  -misc-non-private-member-variables-in-classes,
+  -bugprone-easily-swappable-parameters,
+  -misc-include-cleaner,
+  -portability-avoid-pragma-once,
+  -readability-math-missing-parentheses,
+  -readability-implicit-bool-conversion,
+  -cppcoreguidelines-pro-bounds-avoid-unchecked-container-access,
+  -cppcoreguidelines-pro-bounds-constant-array-index
+
+# Show diagnostics from our own headers only; vendored headers live elsewhere.
+HeaderFilterRegex: 'x4sb/'
+
+# Non-fatal by default so the gate reports without breaking dev builds. To make
+# CI hard-fail, run with: clang-tidy --warnings-as-errors='*'  (or set below).
+WarningsAsErrors: ''
+
+FormatStyle: file
+
+CheckOptions:
+  # Naming, calibrated to the existing source.
+  - { key: readability-identifier-naming.NamespaceCase,        value: lower_case }
+  - { key: readability-identifier-naming.ClassCase,            value: CamelCase  }
+  - { key: readability-identifier-naming.StructCase,           value: CamelCase  }
+  - { key: readability-identifier-naming.EnumCase,             value: CamelCase  }
+  - { key: readability-identifier-naming.UnionCase,            value: CamelCase  }
+  - { key: readability-identifier-naming.TypeAliasCase,        value: CamelCase  }
+  - { key: readability-identifier-naming.TypedefCase,          value: CamelCase  }
+  - { key: readability-identifier-naming.FunctionCase,         value: camelBack  }
+  - { key: readability-identifier-naming.MethodCase,           value: camelBack  }
+  - { key: readability-identifier-naming.VariableCase,         value: camelBack  }
+  - { key: readability-identifier-naming.ParameterCase,        value: camelBack  }
+  - { key: readability-identifier-naming.MemberCase,           value: camelBack  }
+  # Public struct members are plain camelBack; private members carry a trailing '_'.
+  - { key: readability-identifier-naming.PublicMemberCase,     value: camelBack  }
+  - { key: readability-identifier-naming.PrivateMemberCase,    value: camelBack  }
+  - { key: readability-identifier-naming.PrivateMemberSuffix,  value: '_'        }
+  - { key: readability-identifier-naming.EnumConstantCase,     value: CamelCase  }
+  - { key: readability-identifier-naming.ConstexprVariableCase, value: camelBack }
+  # Treat passing structs to functions efficiently, but don't nag on small ones.
+  - { key: performance-unnecessary-value-param.AllowedTypes,   value: 'Vec3;Quat' }

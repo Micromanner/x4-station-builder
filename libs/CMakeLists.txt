@@ -1,0 +1,10 @@
+# Render-free logic units (spec §4B). None of these may link raylib.
+add_subdirectory(archive)
+add_subdirectory(assetpipe)
+add_subdirectory(data)
+add_subdirectory(coords)
+add_subdirectory(document)
+add_subdirectory(snap)
+add_subdirectory(planio)
+add_subdirectory(autolayout)
+add_subdirectory(platform)
