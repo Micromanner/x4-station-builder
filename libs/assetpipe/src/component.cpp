@@ -43,6 +43,19 @@ Transform parseOffset(const pugi::xml_node& conn) {
   return t;
 }
 
+// Visit every <part> of the first <component>'s "part"-tagged connections,
+// invoking fn(part, connectionOffset, connectionTags). Shared by the geometry
+// and bounding-box passes so their connection/part traversal can't diverge.
+template <typename Fn>
+void forEachComponentPart(const pugi::xml_node& comp, Fn fn) {
+  for (const pugi::xml_node c : comp.child("connections").children("connection")) {
+    const std::string tags = normalizeTags(c.attribute("tags").as_string());
+    if (!detail::hasToken(tags, "part")) continue;
+    const Transform offset = parseOffset(c);
+    for (const pugi::xml_node part : c.child("parts").children("part")) fn(part, offset, tags);
+  }
+}
+
 }  // namespace
 
 std::vector<ComponentConnection> parseComponentConnections(const std::string& componentXml) {
@@ -89,17 +102,13 @@ ComponentGeometry parseComponentGeometry(const std::string& componentXml) {
   std::replace(folder.begin(), folder.end(), '\\', '/');  // X4 uses backslashes
   geo.geometryFolder = folder;
 
-  for (const pugi::xml_node c : comp.child("connections").children("connection")) {
-    const std::string tags = normalizeTags(c.attribute("tags").as_string());
-    if (!detail::hasToken(tags, "part")) continue;
-    const Transform offset = parseOffset(c);
-    for (const pugi::xml_node part : c.child("parts").children("part")) {
-      ComponentPart cp;
-      cp.name = part.attribute("name").as_string();
-      cp.offset = offset;
-      if (!cp.name.empty()) geo.parts.push_back(std::move(cp));
-    }
-  }
+  forEachComponentPart(
+      comp, [&geo](const pugi::xml_node& part, const Transform& offset, const std::string&) {
+        ComponentPart cp;
+        cp.name = part.attribute("name").as_string();
+        cp.offset = offset;
+        if (!cp.name.empty()) geo.parts.push_back(std::move(cp));
+      });
   return geo;
 }
 
@@ -110,35 +119,31 @@ AABB moduleAabb(const std::string& componentXml) {
   if (!doc.load_string(componentXml.c_str())) return box;
 
   const pugi::xml_node comp = doc.child("components").child("component");
-  for (const pugi::xml_node c : comp.child("connections").children("connection")) {
-    const std::string tags = normalizeTags(c.attribute("tags").as_string());
-    if (!detail::hasToken(tags, "part")) continue;
-    if (detail::hasToken(tags, "nocollision")) continue;  // detail/anim/fx parts overstate their size box
-    const Transform offset = parseOffset(c);
-    for (const pugi::xml_node part : c.child("parts").children("part")) {
-      const pugi::xml_node size = part.child("size");
-      if (!size) continue;
-      const Vec3 half = readXyz(size.child("max"));
-      const Vec3 ctr = readXyz(size.child("center"));
-      for (int sx = -1; sx <= 1; sx += 2) {
-        for (int sy = -1; sy <= 1; sy += 2) {
-          for (int sz = -1; sz <= 1; sz += 2) {
-            const Vec3 corner{ctr.x + half.x * static_cast<double>(sx),
-                              ctr.y + half.y * static_cast<double>(sy),
-                              ctr.z + half.z * static_cast<double>(sz)};
-            const Vec3 world = apply(offset, corner);
-            if (!any) {
-              box.min = world;
-              box.max = world;
-              any = true;
-            } else {
-              expand(box, world);
-            }
+  forEachComponentPart(comp, [&](const pugi::xml_node& part, const Transform& offset,
+                                 const std::string& tags) {
+    if (detail::hasToken(tags, "nocollision")) return;  // detail/anim/fx parts overstate their size box
+    const pugi::xml_node size = part.child("size");
+    if (!size) return;
+    const Vec3 half = readXyz(size.child("max"));
+    const Vec3 ctr = readXyz(size.child("center"));
+    for (int sx = -1; sx <= 1; sx += 2) {
+      for (int sy = -1; sy <= 1; sy += 2) {
+        for (int sz = -1; sz <= 1; sz += 2) {
+          const Vec3 corner{ctr.x + half.x * static_cast<double>(sx),
+                            ctr.y + half.y * static_cast<double>(sy),
+                            ctr.z + half.z * static_cast<double>(sz)};
+          const Vec3 world = apply(offset, corner);
+          if (!any) {
+            box.min = world;
+            box.max = world;
+            any = true;
+          } else {
+            expand(box, world);
           }
         }
       }
     }
-  }
+  });
   return box;
 }
 

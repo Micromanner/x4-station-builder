@@ -14,6 +14,7 @@
 
 #include <filesystem>
 #include <iostream>
+#include <optional>
 #include <string>
 #include <vector>
 
@@ -45,14 +46,23 @@ std::string flatten(const std::string& s) {
   return out;
 }
 
-int run(const std::string& x4Path, const std::string& outDir, const std::string& componentPath) {
+// Open the X4 install and report what was indexed. Returns nullopt (after
+// printing an error) when no catalogs are found under x4Path.
+std::optional<Archive> openInstall(const std::string& x4Path) {
   Archive archive;
   const int cats = archive.addInstall(x4Path);
   if (cats == 0) {
     std::cerr << "error: no catalogs found under " << x4Path << "\n";
-    return 1;
+    return std::nullopt;
   }
   std::cout << "indexed " << archive.fileCount() << " files from " << cats << " catalogs\n";
+  return archive;
+}
+
+int run(const std::string& x4Path, const std::string& outDir, const std::string& componentPath) {
+  std::optional<Archive> installed = openInstall(x4Path);
+  if (!installed) return 1;
+  Archive& archive = *installed;
 
   const auto componentXml = archive.extract(componentPath);
   if (!componentXml) {
@@ -129,13 +139,9 @@ int run(const std::string& x4Path, const std::string& outDir, const std::string&
 }
 
 int runCatalog(const std::string& x4Path, const std::string& outDir) {
-  Archive archive;
-  const int cats = archive.addInstall(x4Path);
-  if (cats == 0) {
-    std::cerr << "error: no catalogs found under " << x4Path << "\n";
-    return 1;
-  }
-  std::cout << "indexed " << archive.fileCount() << " files from " << cats << " catalogs\n";
+  std::optional<Archive> installed = openInstall(x4Path);
+  if (!installed) return 1;
+  Archive& archive = *installed;
 
   const ExtractFn extract = [&archive](const std::string& path) { return archive.extract(path); };
   const CatalogBuildResult res = buildModuleCatalog(extract, archive.sources());
