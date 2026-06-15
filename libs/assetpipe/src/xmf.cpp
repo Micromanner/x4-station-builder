@@ -2,7 +2,6 @@
 
 #include <sinfl.h>
 
-#include <algorithm>
 #include <cstring>
 #include <limits>
 
@@ -10,28 +9,15 @@ namespace x4sb {
 namespace {
 
 // Little-endian reads (the X4 target is x86/x64; .xmf is little-endian).
-std::uint32_t readU32(const std::string& b, std::size_t off) {
-  std::uint32_t v = 0;
-  std::memcpy(&v, b.data() + off, sizeof(v));
-  return v;
-}
-std::uint8_t readU8(const std::string& b, std::size_t off) {
-  return static_cast<std::uint8_t>(b[off]);
-}
-float readF32(const char* p) {
-  float f = 0.0F;
-  std::memcpy(&f, p, sizeof(f));
-  return f;
-}
-std::uint16_t readU16(const char* p) {
-  std::uint16_t v = 0;
+template <typename T>
+T readLE(const char* p) {
+  T v{};
   std::memcpy(&v, p, sizeof(v));
   return v;
 }
-std::uint32_t readU32p(const char* p) {
-  std::uint32_t v = 0;
-  std::memcpy(&v, p, sizeof(v));
-  return v;
+template <typename T>
+T readLE(const std::string& b, std::size_t off) {
+  return readLE<T>(b.data() + off);
 }
 
 // Chunk descriptor fields, by u32 index within the descriptor (validated against
@@ -59,9 +45,9 @@ bool inflateChunk(const std::string& bytes, std::size_t streamOff, std::uint32_t
 std::optional<XmfMesh> parseXmf(const std::string& bytes) {
   if (bytes.size() < 0x40 || std::memcmp(bytes.data(), "XUMF", 4) != 0) return std::nullopt;
 
-  const std::size_t headerSize = readU8(bytes, 6);
-  const std::size_t numChunks = readU8(bytes, 8);
-  const std::size_t descSize = readU8(bytes, 9);
+  const std::size_t headerSize = readLE<std::uint8_t>(bytes, 6);
+  const std::size_t numChunks = readLE<std::uint8_t>(bytes, 8);
+  const std::size_t descSize = readLE<std::uint8_t>(bytes, 9);
   if (descSize < kStrideOff + 4) return std::nullopt;
 
   const std::size_t descEnd = headerSize + numChunks * descSize;
@@ -77,8 +63,10 @@ std::optional<XmfMesh> parseXmf(const std::string& bytes) {
   std::size_t totalComp = 0;
   for (std::size_t i = 0; i < numChunks; ++i) {
     const std::size_t d = headerSize + i * descSize;
-    const Chunk c{readU32(bytes, d + kTypeOff), readU32(bytes, d + kCompOff),
-                  readU32(bytes, d + kCountOff), readU32(bytes, d + kStrideOff)};
+    const Chunk c{readLE<std::uint32_t>(bytes, d + kTypeOff),
+                  readLE<std::uint32_t>(bytes, d + kCompOff),
+                  readLE<std::uint32_t>(bytes, d + kCountOff),
+                  readLE<std::uint32_t>(bytes, d + kStrideOff)};
     totalComp += c.comp;
     chunks.push_back(c);
   }
@@ -97,9 +85,9 @@ std::optional<XmfMesh> parseXmf(const std::string& bytes) {
       mesh.positions.reserve(c.count);
       for (std::size_t v = 0; v < c.count; ++v) {
         const char* p = buf.data() + v * c.stride;
-        mesh.positions.push_back({static_cast<double>(readF32(p)),
-                                  static_cast<double>(readF32(p + 4)),
-                                  static_cast<double>(readF32(p + 8))});
+        mesh.positions.push_back({static_cast<double>(readLE<float>(p)),
+                                  static_cast<double>(readLE<float>(p + 4)),
+                                  static_cast<double>(readLE<float>(p + 8))});
       }
       haveVertices = true;
     } else if (c.type == kTypeIndex) {
@@ -108,8 +96,8 @@ std::optional<XmfMesh> parseXmf(const std::string& bytes) {
       mesh.indices.reserve(mesh.indices.size() + c.count);
       for (std::size_t k = 0; k < c.count; ++k) {
         const char* p = buf.data() + k * c.stride;
-        mesh.indices.push_back(c.stride == 2 ? static_cast<std::uint32_t>(readU16(p))
-                                             : readU32p(p));
+        mesh.indices.push_back(c.stride == 2 ? static_cast<std::uint32_t>(readLE<std::uint16_t>(p))
+                                             : readLE<std::uint32_t>(p));
       }
     }
     streamOff += c.comp;
@@ -118,12 +106,7 @@ std::optional<XmfMesh> parseXmf(const std::string& bytes) {
   if (!haveVertices || mesh.positions.empty()) return std::nullopt;
 
   mesh.bounds.min = mesh.bounds.max = mesh.positions.front();
-  for (const Vec3& v : mesh.positions) {
-    mesh.bounds.min = {std::min(mesh.bounds.min.x, v.x), std::min(mesh.bounds.min.y, v.y),
-                       std::min(mesh.bounds.min.z, v.z)};
-    mesh.bounds.max = {std::max(mesh.bounds.max.x, v.x), std::max(mesh.bounds.max.y, v.y),
-                       std::max(mesh.bounds.max.z, v.z)};
-  }
+  for (const Vec3& v : mesh.positions) expand(mesh.bounds, v);
   return mesh;
 }
 

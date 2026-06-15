@@ -75,13 +75,12 @@ bool collidesWithStation(const ModuleDef& def, const Transform& worldTransform,
                          const ModuleCatalog& catalog) {
   // TODO(snap): rotation-aware world AABB (or OBB per spec §6). Baseline only
   // translates the local AABB, which is exact while rotation is identity.
-  const AABB a{def.aabb.min + worldTransform.position, def.aabb.max + worldTransform.position};
+  const AABB a = def.aabb + worldTransform.position;
   for (const auto& placed : station.modules()) {
     if (placed.instanceId == ignoreInstanceId) continue;
     const ModuleDef* other = catalog.find(placed.defId);
     if (!other) continue;
-    const AABB b{other->aabb.min + placed.worldTransform.position,
-                 other->aabb.max + placed.worldTransform.position};
+    const AABB b = other->aabb + placed.worldTransform.position;
     if (overlaps(a, b)) return true;
   }
   return false;

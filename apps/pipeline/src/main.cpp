@@ -10,7 +10,6 @@
 #include "x4sb/assetpipe/gltf.hpp"
 #include "x4sb/assetpipe/xmf.hpp"
 
-#include <algorithm>
 #include <filesystem>
 #include <iostream>
 #include <string>
@@ -96,17 +95,8 @@ int run(const std::string& x4Path, const std::string& outDir, const std::string&
     ++converted;
     totalVerts += mesh->positions.size();
     totalTris += mesh->indices.size() / 3;
-    if (!haveBounds) {
-      bounds = mesh->bounds;
-      haveBounds = true;
-    } else {
-      bounds.min = {std::min(bounds.min.x, mesh->bounds.min.x),
-                    std::min(bounds.min.y, mesh->bounds.min.y),
-                    std::min(bounds.min.z, mesh->bounds.min.z)};
-      bounds.max = {std::max(bounds.max.x, mesh->bounds.max.x),
-                    std::max(bounds.max.y, mesh->bounds.max.y),
-                    std::max(bounds.max.z, mesh->bounds.max.z)};
-    }
+    bounds = haveBounds ? merge(bounds, mesh->bounds) : mesh->bounds;
+    haveBounds = true;
     // Merge this part into the whole-module mesh at its mount offset.
     const std::size_t base = assembled.positions.size();
     for (const Vec3& v : mesh->positions) assembled.positions.push_back(apply(part.offset, v));

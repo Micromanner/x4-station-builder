@@ -2,6 +2,7 @@
 // Minimal, render-free math primitives shared across all libs.
 // Deliberately independent of raylib so the logic units test headlessly;
 // conversion to raylib's types happens only inside apps/editor.
+#include <algorithm>
 #include <cmath>
 
 namespace x4sb {
@@ -56,5 +57,20 @@ inline bool overlaps(const AABB& a, const AABB& b) {
   return a.min.x <= b.max.x && a.max.x >= b.min.x && a.min.y <= b.max.y && a.max.y >= b.min.y &&
          a.min.z <= b.max.z && a.max.z >= b.min.z;
 }
+
+// Grow box in place to contain point p.
+inline void expand(AABB& box, Vec3 p) {
+  box.min = {std::min(box.min.x, p.x), std::min(box.min.y, p.y), std::min(box.min.z, p.z)};
+  box.max = {std::max(box.max.x, p.x), std::max(box.max.y, p.y), std::max(box.max.z, p.z)};
+}
+
+// Smallest box containing both a and b.
+inline AABB merge(const AABB& a, const AABB& b) {
+  return {{std::min(a.min.x, b.min.x), std::min(a.min.y, b.min.y), std::min(a.min.z, b.min.z)},
+          {std::max(a.max.x, b.max.x), std::max(a.max.y, b.max.y), std::max(a.max.z, b.max.z)}};
+}
+
+// Translate box by t (axes are unchanged, so the result stays axis-aligned).
+inline AABB operator+(const AABB& b, Vec3 t) { return {b.min + t, b.max + t}; }
 
 }  // namespace x4sb

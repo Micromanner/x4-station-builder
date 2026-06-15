@@ -48,11 +48,14 @@ void writeOffset(pugi::xml_node entry, const Transform& world) {
 
   double yaw, pitch, roll;
   x4EulerFromQuat(x4.rotation, yaw, pitch, roll);
-  if (std::abs(yaw) > kAngleEps || std::abs(pitch) > kAngleEps || std::abs(roll) > kAngleEps) {
+  const double absYaw = std::abs(yaw);
+  const double absPitch = std::abs(pitch);
+  const double absRoll = std::abs(roll);
+  if (absYaw > kAngleEps || absPitch > kAngleEps || absRoll > kAngleEps) {
     pugi::xml_node rot = off.append_child("rotation");
-    if (std::abs(yaw) > kAngleEps) rot.append_attribute("yaw") = yaw;
-    if (std::abs(pitch) > kAngleEps) rot.append_attribute("pitch") = pitch;
-    if (std::abs(roll) > kAngleEps) rot.append_attribute("roll") = roll;
+    if (absYaw > kAngleEps) rot.append_attribute("yaw") = yaw;
+    if (absPitch > kAngleEps) rot.append_attribute("pitch") = pitch;
+    if (absRoll > kAngleEps) rot.append_attribute("roll") = roll;
   }
 }
 
