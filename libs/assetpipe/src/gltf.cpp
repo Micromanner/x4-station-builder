@@ -53,19 +53,23 @@ void appendBytes(std::string& blob, const void* p, std::size_t n) {
 
 }  // namespace
 
-std::string meshToGltf(const XmfMesh& mesh) {
+std::string meshToGltf(const XmfMesh& mesh, bool deindex) {
   if (mesh.positions.empty() || mesh.indices.empty()) return {};
 
-  // Binary buffer: float32 positions, then uint32 indices (both 4-byte aligned).
-  std::string blob;
-  blob.reserve(mesh.positions.size() * 12 + mesh.indices.size() * 4);
+  // De-indexing dereferences positions[idx]; validate every index up front so a
+  // corrupt/hostile .xmf can't drive an out-of-bounds read (untrusted-input bar).
+  if (deindex) {
+    for (const std::uint32_t idx : mesh.indices)
+      if (idx >= mesh.positions.size()) return {};
+  }
 
+  std::string blob;
   std::array<float, 3> lo{std::numeric_limits<float>::max(), std::numeric_limits<float>::max(),
                           std::numeric_limits<float>::max()};
   std::array<float, 3> hi{std::numeric_limits<float>::lowest(),
                           std::numeric_limits<float>::lowest(),
                           std::numeric_limits<float>::lowest()};
-  for (const Vec3& v : mesh.positions) {
+  const auto appendVertex = [&](const Vec3& v) {
     const std::array<float, 3> f{static_cast<float>(v.x), static_cast<float>(v.y),
                                  static_cast<float>(v.z)};
     for (std::size_t k = 0; k < 3; ++k) {
@@ -73,42 +77,54 @@ std::string meshToGltf(const XmfMesh& mesh) {
       hi[k] = std::max(hi[k], f[k]);
     }
     appendBytes(blob, f.data(), f.size() * sizeof(float));
+  };
+
+  // Vertex stream: the raw positions (indexed), or one expanded vertex per index
+  // (de-indexed — no index buffer follows, so the primitive draws via glDrawArrays).
+  if (deindex) {
+    blob.reserve(mesh.indices.size() * 12);
+    for (const std::uint32_t idx : mesh.indices) appendVertex(mesh.positions[idx]);
+  } else {
+    blob.reserve(mesh.positions.size() * 12 + mesh.indices.size() * 4);
+    for (const Vec3& v : mesh.positions) appendVertex(v);
   }
   const std::size_t posBytes = blob.size();
-  for (const std::uint32_t idx : mesh.indices) appendBytes(blob, &idx, sizeof(idx));
-  const std::size_t idxBytes = blob.size() - posBytes;
-
-  const std::size_t vertexCount = mesh.positions.size();
-  const std::size_t indexCount = mesh.indices.size();
+  const std::size_t vertexCount = deindex ? mesh.indices.size() : mesh.positions.size();
 
   json doc;
   doc["asset"] = {{"version", "2.0"}, {"generator", "x4sb-pipeline"}};
+  doc["accessors"] = json::array({{{"bufferView", 0},
+                                   {"componentType", 5126},
+                                   {"count", vertexCount},
+                                   {"type", "VEC3"},
+                                   {"min", {lo[0], lo[1], lo[2]}},
+                                   {"max", {hi[0], hi[1], hi[2]}}}});
+  json bufferViews = json::array(
+      {{{"buffer", 0}, {"byteOffset", 0}, {"byteLength", posBytes}, {"target", 34962}}});
+  json primitive = {{"attributes", {{"POSITION", 0}}}, {"mode", 4}};
+
+  if (!deindex) {
+    for (const std::uint32_t idx : mesh.indices) appendBytes(blob, &idx, sizeof(idx));
+    const std::size_t idxBytes = blob.size() - posBytes;
+    bufferViews.push_back(
+        {{"buffer", 0}, {"byteOffset", posBytes}, {"byteLength", idxBytes}, {"target", 34963}});
+    doc["accessors"].push_back(
+        {{"bufferView", 1}, {"componentType", 5125}, {"count", mesh.indices.size()}, {"type", "SCALAR"}});
+    primitive["indices"] = 1;
+  }
+
   doc["buffers"] = json::array({{{"byteLength", blob.size()},
                                  {"uri", "data:application/octet-stream;base64," + base64(blob)}}});
-  doc["bufferViews"] = json::array({
-      {{"buffer", 0}, {"byteOffset", 0}, {"byteLength", posBytes}, {"target", 34962}},
-      {{"buffer", 0}, {"byteOffset", posBytes}, {"byteLength", idxBytes}, {"target", 34963}},
-  });
-  doc["accessors"] = json::array({
-      {{"bufferView", 0},
-       {"componentType", 5126},
-       {"count", vertexCount},
-       {"type", "VEC3"},
-       {"min", {lo[0], lo[1], lo[2]}},
-       {"max", {hi[0], hi[1], hi[2]}}},
-      {{"bufferView", 1}, {"componentType", 5125}, {"count", indexCount}, {"type", "SCALAR"}},
-  });
-  doc["meshes"] = json::array(
-      {{{"primitives",
-         json::array({{{"attributes", {{"POSITION", 0}}}, {"indices", 1}, {"mode", 4}}})}}});
+  doc["bufferViews"] = std::move(bufferViews);
+  doc["meshes"] = json::array({{{"primitives", json::array({std::move(primitive)})}}});
   doc["nodes"] = json::array({{{"mesh", 0}}});
   doc["scenes"] = json::array({{{"nodes", json::array({0})}}});
   doc["scene"] = 0;
   return doc.dump(2);
 }
 
-bool writeGltfFile(const XmfMesh& mesh, const std::string& path) {
-  const std::string text = meshToGltf(mesh);
+bool writeGltfFile(const XmfMesh& mesh, const std::string& path, bool deindex) {
+  const std::string text = meshToGltf(mesh, deindex);
   if (text.empty()) return false;
   std::ofstream out(path, std::ios::binary);
   if (!out) return false;

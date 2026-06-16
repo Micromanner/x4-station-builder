@@ -10,10 +10,13 @@
 namespace x4sb {
 
 // Serialize a mesh to glTF 2.0 JSON text. Returns empty string if the mesh has
-// no geometry.
-std::string meshToGltf(const XmfMesh& mesh);
+// no geometry. When `deindex` is true the index buffer is expanded into a flat
+// vertex stream and omitted from the primitive — used for meshes whose vertex
+// count exceeds raylib's 16-bit index limit, which then draw via glDrawArrays
+// instead of wrapping their indices into garbage triangles.
+std::string meshToGltf(const XmfMesh& mesh, bool deindex = false);
 
 // Write meshToGltf() to a file. Returns false on empty mesh or IO error.
-[[nodiscard]] bool writeGltfFile(const XmfMesh& mesh, const std::string& path);
+[[nodiscard]] bool writeGltfFile(const XmfMesh& mesh, const std::string& path, bool deindex = false);
 
 }  // namespace x4sb

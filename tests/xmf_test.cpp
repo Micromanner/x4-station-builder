@@ -86,3 +86,16 @@ TEST_CASE("meshToGltf emits valid glTF 2.0 with matching counts and an embedded 
   const std::string uri = doc["buffers"][0]["uri"];
   CHECK(uri.rfind("data:application/octet-stream;base64,", 0) == 0);
 }
+
+TEST_CASE("meshToGltf de-indexed expands vertices and omits the index buffer") {
+  const auto mesh = parseXmf(fixture());
+  REQUIRE(mesh.has_value());
+
+  const nlohmann::json doc = nlohmann::json::parse(meshToGltf(*mesh, /*deindex=*/true));
+  REQUIRE(doc["accessors"].size() == 1);      // POSITION only — no index accessor
+  CHECK(doc["accessors"][0]["count"] == 12);  // one vertex per index (the tetra has 12)
+  CHECK(doc["bufferViews"].size() == 1);
+  const auto& prim = doc["meshes"][0]["primitives"][0];
+  CHECK_FALSE(prim.contains("indices"));  // draws via glDrawArrays, immune to the u16 cap
+  CHECK(prim["mode"] == 4);
+}

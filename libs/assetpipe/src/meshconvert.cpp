@@ -114,18 +114,18 @@ MeshConvertResult convertModuleMeshes(const ExtractFn& extract,
             note("[fail] " + rel + " (xmf parse failed)");
             continue;
           }
-          if (!writeGltfFile(*mesh, outPath.string())) {
+          // No LOD fit the u16 limit (e.g. piers ship identical LODs): de-index so
+          // the mesh draws via glDrawArrays instead of boxing the whole module.
+          const bool deindex = mesh->positions.size() > kU16VertexLimit;
+          if (!writeGltfFile(*mesh, outPath.string(), deindex)) {
             ++res.failed;
             note("[fail] " + rel + " (gltf write failed)");
             continue;
           }
           ++res.converted;
-          if (chosen > 0) {
-            ++res.reducedLod;
-            note("[ok]   " + rel + " (lod" + std::to_string(chosen) + ")");
-          } else {
-            note("[ok]   " + rel);
-          }
+          if (deindex) ++res.deindexed;
+          if (chosen > 0) ++res.reducedLod;
+          note("[ok]   " + rel + (deindex ? " (de-indexed)" : chosen > 0 ? " (lod" + std::to_string(chosen) + ")" : ""));
         }
       },
       skipped);

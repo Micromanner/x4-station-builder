@@ -86,11 +86,12 @@ const ::Model* MeshCache::get(const std::string& gltfPath) {
     return nullptr;
   }
 
-  // Reject an oversized part (see kU16IndexLimit) so the caller boxes the module;
-  // the real fix is de-indexing/splitting in the asset pipeline (see design
-  // "Implementation status" / xmf-format memory).
+  // Reject an INDEXED oversized part (see kU16IndexLimit) so the caller boxes the
+  // module: raylib's 16-bit indices would wrap into garbage. A de-indexed part (the
+  // pipeline expands oversized meshes to a flat vertex stream with no index buffer)
+  // draws via glDrawArrays and is immune, so only indexed meshes are gated here.
   for (int i = 0; i < m.meshCount; ++i) {
-    if (m.meshes[i].vertexCount > kU16IndexLimit) {
+    if (m.meshes[i].indices != nullptr && m.meshes[i].vertexCount > kU16IndexLimit) {
       TraceLog(LOG_WARNING, "MeshCache: %s exceeds u16 index limit (%d verts) - boxing module",
                gltfPath.c_str(), m.meshes[i].vertexCount);
       oversized_.insert(gltfPath);

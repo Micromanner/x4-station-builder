@@ -197,6 +197,10 @@ TEST_CASE("isVisualPart drops effects and non-visual helper geometry") {
   CHECK_FALSE(isVisualPart("fx_decals"));
   CHECK_FALSE(isVisualPart("fx_fieldlines"));
   CHECK_FALSE(isVisualPart("fx_glow"));
+  // An fx effect can hide under a visual prefix (e.g. "part_fx_lightcones" on
+  // prod_par_sojabeans, "anim_fx_fire") — the "fx" token must be caught anywhere.
+  CHECK_FALSE(isVisualPart("part_fx_lightcones"));
+  CHECK_FALSE(isVisualPart("anim_fx_fire"));
   // Pure non-visual helpers: collision/bounds/trigger/dummy/emitter volumes.
   CHECK_FALSE(isVisualPart("collisionbox"));
   CHECK_FALSE(isVisualPart("bounding_box"));

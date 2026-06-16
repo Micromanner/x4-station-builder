@@ -22,6 +22,7 @@ struct MeshConvertResult {
   std::size_t skipped{};     // parts whose output already existed (force == false)
   std::size_t failed{};      // parts whose source was missing or failed to parse/write
   std::size_t reducedLod{};  // parts converted at a LOD below 0 to fit the u16 limit
+  std::size_t deindexed{};   // oversized parts written de-indexed (no LOD fit the u16 limit)
 };
 
 // raylib stores mesh indices as 16-bit, so a converted mesh must stay at/under

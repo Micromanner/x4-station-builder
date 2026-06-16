@@ -111,9 +111,11 @@ bool isVisualPart(std::string_view name) {
   };
 
   // Effects (decals/glows/fieldlines/lightcones), particle emitters, and
-  // scale/editor dummies are prefix-tagged and never render as solid geometry.
-  if (startsWith("fx_") || startsWith("emitterfx") || startsWith("scaledummy") ||
-      startsWith("editor")) {
+  // scale/editor dummies never render as solid geometry. The "fx" token can sit
+  // under a visual prefix too ("part_fx_lightcones", "anim_fx_fire"), so match it
+  // anywhere as well as the plain "fx_" prefix.
+  if (startsWith("fx_") || contains("_fx_") || startsWith("emitterfx") ||
+      startsWith("scaledummy") || startsWith("editor")) {
     return false;
   }
   // Pure non-visual volumes (collision/bounds/trigger/darkening). The token can
