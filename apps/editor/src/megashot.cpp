@@ -6,6 +6,7 @@
 
 #include "x4sb/data/catalog.hpp"
 #include "x4sb/data/math.hpp"
+#include "x4sb/editorcore/display_flip.hpp"
 #include "x4sb/planio/plan.hpp"
 
 #include "raylib.h"
@@ -83,18 +84,12 @@ int runMegaShot(const std::string& planPath, const std::string& outPrefix) {
     return 1;
   }
 
-  // Whole-station bounds (X4 space), matching main.cpp's stationBounds().
-  const auto& mods = station->modules();
-  AABB box{mods.front().worldTransform.position, mods.front().worldTransform.position};
-  for (const auto& pm : mods) {
-    const ModuleDef* d = catalog->find(pm.defId);
-    if (d == nullptr) continue;
-    box = merge(box, worldAabb(d->aabb, pm.worldTransform));
-  }
-  const Vec3 c = (box.min + box.max) * 0.5;
-  const double radius = length(box.max - box.min) * 0.5;
+  const StationBounds bounds = stationBounds(*station, *catalog);
+  const Vec3 c = bounds.center;
+  const double radius = bounds.radius;
   std::printf("megashot: modules=%zu bbox min=(%.0f,%.0f,%.0f) max=(%.0f,%.0f,%.0f)\n",
-              mods.size(), box.min.x, box.min.y, box.min.z, box.max.x, box.max.y, box.max.z);
+              station->modules().size(), bounds.box.min.x, bounds.box.min.y, bounds.box.min.z,
+              bounds.box.max.x, bounds.box.max.y, bounds.box.max.z);
   std::printf("megashot: center=(%.0f,%.0f,%.0f) radius=%.0f\n", c.x, c.y, c.z, radius);
 
   InitWindow(kScreenW, kScreenH, "X4 Station Builder - megashot");
@@ -104,8 +99,9 @@ int runMegaShot(const std::string& planPath, const std::string& outPrefix) {
     MeshCache meshes{std::filesystem::path(*catalogPath).parent_path()};
 
     // Display-space target (the scene flips Z).
-    const ::Vector3 target{static_cast<float>(c.x), static_cast<float>(c.y),
-                           static_cast<float>(-c.z)};
+    const Vec3 dt = flipZ(c);
+    const ::Vector3 target{static_cast<float>(dt.x), static_cast<float>(dt.y),
+                           static_cast<float>(dt.z)};
 
     // A yaw sweep at the framed distance is the direct test for symptom 2 ("rotating
     // drops half"): every angle must show a full, complete station. Plus an inside
@@ -116,7 +112,7 @@ int runMegaShot(const std::string& planPath, const std::string& outPrefix) {
     };
     for (const Shot& shot : shots) {
       const double dist = radius * shot.distFactor;
-      const double yaw = shot.yawDeg * 3.14159265358979323846 / 180.0;
+      const double yaw = shot.yawDeg * static_cast<double>(DEG2RAD);
       const double pitch = 0.45;  // ~26 deg, a 3/4 elevation
       const Vec3 dirN{std::cos(pitch) * std::sin(yaw), std::sin(pitch),
                       std::cos(pitch) * std::cos(yaw)};

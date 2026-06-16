@@ -45,6 +45,10 @@ void main() {
 }
 )";
 
+// raylib stores mesh indices as 16-bit, so a part with more than this many
+// vertices loads with wrapped indices (renders as a spray of huge triangles).
+constexpr int kU16IndexLimit = 65535;
+
 }  // namespace
 
 MeshCache::MeshCache(std::filesystem::path assetRoot) : root_(std::move(assetRoot)) {
@@ -82,12 +86,11 @@ const ::Model* MeshCache::get(const std::string& gltfPath) {
     return nullptr;
   }
 
-  // raylib stores mesh indices as 16-bit, so a part with >65535 vertices loads
-  // with wrapped indices (it rendered as a spray of huge triangles). Reject it so
-  // the caller boxes the module; the real fix is de-indexing/splitting in the
-  // asset pipeline (see design "Implementation status" / xmf-format memory).
+  // Reject an oversized part (see kU16IndexLimit) so the caller boxes the module;
+  // the real fix is de-indexing/splitting in the asset pipeline (see design
+  // "Implementation status" / xmf-format memory).
   for (int i = 0; i < m.meshCount; ++i) {
-    if (m.meshes[i].vertexCount > 65535) {
+    if (m.meshes[i].vertexCount > kU16IndexLimit) {
       TraceLog(LOG_WARNING, "MeshCache: %s exceeds u16 index limit (%d verts) - boxing module",
                gltfPath.c_str(), m.meshes[i].vertexCount);
       oversized_.insert(gltfPath);

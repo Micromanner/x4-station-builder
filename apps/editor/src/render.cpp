@@ -5,6 +5,7 @@
 #include "rlgl.h"
 
 #include "x4sb/data/types.hpp"
+#include "x4sb/editorcore/display_flip.hpp"
 
 #include <algorithm>
 #include <cmath>
@@ -177,15 +178,21 @@ struct LodMetrics {
   double pixelSize;  // projected radius in screen pixels (0 if behind)
 };
 
-// `projFactor` is screenH / (2*tan(fovy/2)), precomputed once per frame by the
-// caller — identical for every module, so this stays free of per-module trig and
-// global-state queries.
+// screenH / (2*tan(fovy/2)): maps a world radius at unit depth to projected
+// pixels. Identical for every module, so it's computed once per frame and threaded
+// into lodMetrics, keeping the per-module path free of trig + global-state queries.
+[[nodiscard]] double projFactor(const ::Camera3D& cam) {
+  return static_cast<double>(GetScreenHeight()) /
+         (2.0 * std::tan(static_cast<double>(cam.fovy) * static_cast<double>(DEG2RAD) * 0.5));
+}
+
+// `projF` is projFactor(cam), precomputed once per frame by the caller.
 [[nodiscard]] LodMetrics lodMetrics(const ModuleDef& def, const PlacedModule& pm,
-                                    const ::Camera3D& cam, double projFactor) {
+                                    const ::Camera3D& cam, double projF) {
   const AABB wbox = worldAabb(def.aabb, pm.worldTransform);  // X4 space
   const Vec3 c = (wbox.min + wbox.max) * 0.5;
   const double r = length(wbox.max - wbox.min) * 0.5;
-  const Vec3 dc{c.x, c.y, -c.z};  // X4 -> display space
+  const Vec3 dc = flipZ(c);  // X4 -> display space
 
   const Vec3 camPos{cam.position.x, cam.position.y, cam.position.z};
   const Vec3 camTgt{cam.target.x, cam.target.y, cam.target.z};
@@ -196,7 +203,7 @@ struct LodMetrics {
   const Vec3 rel = dc - camPos;
   const double along = dot(rel, fwd);
   const double lateral = length(rel - fwd * along);
-  const double pixelSize = along > 0 ? (r / along) * projFactor : 0.0;
+  const double pixelSize = along > 0 ? (r / along) * projF : 0.0;
   return {along, lateral, r, pixelSize};
 }
 
@@ -238,19 +245,18 @@ constexpr float kMeshPx = 12.0f;
 void drawPlacedModules(const Station& station, const ModuleCatalog& catalog,
                        std::optional<InstanceId> selected, MeshCache& meshes, bool showGizmos,
                        bool showMeshes, const ::Camera3D& camera, bool allConnectors) {
-  const double projFactor =
-      static_cast<double>(GetScreenHeight()) /
-      (2.0 * std::tan(static_cast<double>(camera.fovy) * static_cast<double>(DEG2RAD) * 0.5));
+  const double projF = projFactor(camera);
   const ViewCull vc = viewCull(camera);
 
   // Pass 1: solid meshes. Backface culling on — correct + cheaper under the flip.
   rlEnableBackfaceCulling();
   std::vector<std::pair<const ModuleDef*, const PlacedModule*>> boxes;
+  boxes.reserve(station.modules().size());  // most modules collapse to a box; size up front
   for (const auto& pm : station.modules()) {
     const ModuleDef* def = catalog.find(pm.defId);
     if (def == nullptr) continue;
     const bool sel = selected.has_value() && *selected == pm.instanceId;
-    const LodMetrics lod = lodMetrics(*def, pm, camera, projFactor);
+    const LodMetrics lod = lodMetrics(*def, pm, camera, projF);
     if (!sel && frustumCull(lod, vc)) continue;
 
     const bool detailed = sel || lod.pixelSize >= static_cast<double>(kMeshPx);
@@ -284,16 +290,14 @@ void drawPlacedModules(const Station& station, const ModuleCatalog& catalog,
 
 RenderStats lodStats(const Station& station, const ModuleCatalog& catalog,
                      const ::Camera3D& camera) {
-  const double projFactor =
-      static_cast<double>(GetScreenHeight()) /
-      (2.0 * std::tan(static_cast<double>(camera.fovy) * static_cast<double>(DEG2RAD) * 0.5));
+  const double projF = projFactor(camera);
   const ViewCull vc = viewCull(camera);
   RenderStats s;
   for (const auto& pm : station.modules()) {
     const ModuleDef* def = catalog.find(pm.defId);
     if (def == nullptr) continue;
     ++s.total;
-    const LodMetrics lod = lodMetrics(*def, pm, camera, projFactor);
+    const LodMetrics lod = lodMetrics(*def, pm, camera, projF);
     if (frustumCull(lod, vc)) {
       ++s.culled;
       continue;
@@ -304,6 +308,19 @@ RenderStats lodStats(const Station& station, const ModuleCatalog& catalog,
       ++s.drawnBox;
   }
   return s;
+}
+
+StationBounds stationBounds(const Station& station, const ModuleCatalog& catalog) {
+  const auto& mods = station.modules();
+  if (mods.empty()) return {AABB{Vec3{0, 0, 0}, Vec3{0, 0, 0}}, Vec3{0, 0, 0}, 0.0};
+  AABB box{mods.front().worldTransform.position, mods.front().worldTransform.position};
+  for (const auto& pm : mods) {
+    const ModuleDef* def = catalog.find(pm.defId);
+    if (def == nullptr) continue;
+    box = merge(box, worldAabb(def->aabb, pm.worldTransform));
+  }
+  const Vec3 center = (box.min + box.max) * 0.5;
+  return {box, center, length(box.max - box.min) * 0.5};
 }
 
 void drawScene(const EditorState& state, const ::Camera3D& camera, MeshCache& meshes,

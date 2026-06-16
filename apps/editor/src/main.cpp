@@ -12,6 +12,7 @@
 #include "snaptest.hpp"
 
 #include "x4sb/data/catalog.hpp"
+#include "x4sb/editorcore/display_flip.hpp"
 #include "x4sb/editorcore/editor_state.hpp"
 
 #include "raylib.h"
@@ -25,24 +26,18 @@ namespace {
 constexpr int kScreenW = 1280;
 constexpr int kScreenH = 720;
 
-// Combined center + radius of the whole station (for the F-frame key).
+// Display-space center + radius of the whole station (for the F-frame key). An
+// empty station keeps a sane default framing.
 void stationBounds(const x4sb::EditorState& s, ::Vector3& centerOut, float& radiusOut) {
-  centerOut = ::Vector3{0, 0, 0};
-  radiusOut = 20.0f;
-  const auto& mods = s.station().modules();
-  if (mods.empty()) return;
-  x4sb::AABB box{mods.front().worldTransform.position, mods.front().worldTransform.position};
-  for (const auto& pm : mods) {
-    const x4sb::ModuleDef* d = s.defFor(pm.defId);
-    if (d == nullptr) continue;
-    const x4sb::AABB wb = x4sb::worldAabb(d->aabb, pm.worldTransform);
-    box = x4sb::merge(box, wb);
+  if (s.station().modules().empty()) {
+    centerOut = ::Vector3{0, 0, 0};
+    radiusOut = 20.0f;
+    return;
   }
-  const x4sb::Vec3 c = (box.min + box.max) * 0.5;
-  centerOut = ::Vector3{static_cast<float>(c.x), static_cast<float>(c.y),
-                        static_cast<float>(-c.z)};  // display space (flip Z)
-  const x4sb::Vec3 ext = box.max - box.min;
-  radiusOut = static_cast<float>(x4sb::length(ext) * 0.5);
+  const x4sb::editor::StationBounds b = x4sb::editor::stationBounds(s.station(), s.catalog());
+  const x4sb::Vec3 d = x4sb::flipZ(b.center);  // display space
+  centerOut = ::Vector3{static_cast<float>(d.x), static_cast<float>(d.y), static_cast<float>(d.z)};
+  radiusOut = static_cast<float>(b.radius);
 }
 
 // Error loop: catalog not found / unparseable. Show what we tried until closed.

@@ -4,6 +4,7 @@
 // drawn outside Mode3D.
 #include "mesh_cache.hpp"
 
+#include "x4sb/data/math.hpp"
 #include "x4sb/editorcore/editor_state.hpp"
 
 #include "raylib.h"
@@ -38,6 +39,17 @@ struct RenderStats {
 };
 [[nodiscard]] RenderStats lodStats(const Station& station, const ModuleCatalog& catalog,
                                    const ::Camera3D& camera);
+
+// Combined X4-space bounds of every placed module (modules with no resolvable def
+// are skipped). `radius` is the bounding-sphere radius. An empty station yields a
+// zeroed box/center and radius 0; callers apply their own framing default. Used by
+// the F-frame key and the --megashot harness so both frame a station identically.
+struct StationBounds {
+  AABB box;
+  Vec3 center;
+  double radius{0.0};
+};
+[[nodiscard]] StationBounds stationBounds(const Station& station, const ModuleCatalog& catalog);
 
 // Draw the 2D HUD overlay (active module, filter, counts, undo state, controls).
 void drawHud(const EditorState& state, int screenWidth, int screenHeight, bool showGizmos);
