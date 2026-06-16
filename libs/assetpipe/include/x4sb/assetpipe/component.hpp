@@ -45,6 +45,13 @@ struct ComponentGeometry {
 // Parse the geometry source folder and visual part list from a component XML.
 ComponentGeometry parseComponentGeometry(const std::string& componentXml);
 
+// The source .xmf path of a visual part's LOD0 mesh, e.g.
+// "<geometryFolder>/part_main-lod0.xmf". The input-side mirror of meshGltfPath:
+// the batch converter and the pipeline CLI derive their source paths through
+// this so the LOD-suffix/join convention lives in exactly one place.
+[[nodiscard]] std::string partXmfPath(const std::string& geometryFolder,
+                                      const std::string& partName);
+
 // The module's overall AABB in module-local space: the union of each visual
 // part's <size>/<max> half-extents about <size>/<center>, transformed by the
 // part's mount offset. Returns a zero box if no part declares a <size>.

@@ -52,14 +52,14 @@ constexpr const char* kPreferredMacro = "struct_arg_cross_01_macro";
       allMeshesExist(*preferred, assetRoot)) {
     return preferred;
   }
-  // Deterministic fallback: scan ids in sorted order so the choice is stable.
-  std::vector<std::string> ids;
-  ids.reserve(catalog.all().size());
-  for (const auto& entry : catalog.all()) ids.push_back(entry.first);
-  std::sort(ids.begin(), ids.end());
-  for (const std::string& id : ids) {
-    const ModuleDef* def = catalog.find(id);
-    if (def == nullptr || def->category != Category::Connector) continue;
+  // Deterministic fallback: scan modules in sorted id order so the choice is stable.
+  std::vector<const ModuleDef*> defs;
+  defs.reserve(catalog.all().size());
+  for (const auto& entry : catalog.all()) defs.push_back(&entry.second);
+  std::sort(defs.begin(), defs.end(),
+            [](const ModuleDef* a, const ModuleDef* b) { return a->id < b->id; });
+  for (const ModuleDef* def : defs) {
+    if (def->category != Category::Connector) continue;
     if (def->connectionPoints.size() < 2) continue;
     if (allMeshesExist(*def, assetRoot)) return def;
   }
@@ -119,7 +119,6 @@ int runSnapTest(const std::string& outPrefix) {
   InitWindow(kScreenW, kScreenH, "X4 Station Builder - snaptest");
   SetTargetFPS(60);
 
-  int exitCode = 0;
   {  // Inner scope: MeshCache destructs (UnloadModel) before CloseWindow below.
     MeshCache meshes{assetRoot};
 
@@ -204,7 +203,7 @@ int runSnapTest(const std::string& outPrefix) {
   }
 
   CloseWindow();  // after MeshCache destruction (UnloadModel needs the context)
-  return exitCode;
+  return 0;
 }
 
 }  // namespace x4sb::editor

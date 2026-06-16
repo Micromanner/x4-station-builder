@@ -19,9 +19,7 @@ std::unordered_map<std::string, std::string> parseModuleIndex(const std::string&
     if (name.empty() || value.empty()) continue;
     std::replace(value.begin(), value.end(), '\\', '/');
     // Some index values use doubled separators ("\\"); collapse "//" -> "/".
-    value.erase(std::unique(value.begin(), value.end(),
-                            [](char a, char b) { return a == '/' && b == '/'; }),
-                value.end());
+    value = detail::collapseSlashes(std::move(value));
     out[detail::toLower(std::move(name))] = detail::toLower(value + ".xml");
   }
   return out;

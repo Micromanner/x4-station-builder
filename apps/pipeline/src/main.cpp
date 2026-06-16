@@ -92,7 +92,7 @@ int run(const std::string& x4Path, const std::string& outDir, const std::string&
   AABB bounds{};
   XmfMesh assembled;  // all parts merged at their connection offsets (whole module)
   for (const auto& part : geo.parts) {
-    const std::string logical = geo.geometryFolder + "/" + part.name + "-lod0.xmf";
+    const std::string logical = partXmfPath(geo.geometryFolder, part.name);
     const auto meshBytes = archive.extract(logical);
     if (!meshBytes) {
       std::cout << "  [skip] " << part.name << " (no " << logical << ")\n";

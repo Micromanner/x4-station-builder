@@ -26,5 +26,15 @@ namespace detail {
   return false;
 }
 
+// Collapse runs of '/' into a single '/'. Some X4 source paths use doubled
+// separators (a "\\" that becomes "//" after the '\\'->'/' pass); this normalizes
+// them to match the single-slash archive entries. Takes by value so callers can
+// move into it.
+[[nodiscard]] inline std::string collapseSlashes(std::string s) {
+  s.erase(std::unique(s.begin(), s.end(), [](char a, char b) { return a == '/' && b == '/'; }),
+          s.end());
+  return s;
+}
+
 }  // namespace detail
 }  // namespace x4sb

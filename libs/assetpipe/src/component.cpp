@@ -33,12 +33,7 @@ Vec3 readXyz(const pugi::xml_node& n) {
 // "...landmarks//foo_data" after the '\'->'/' pass and no longer matches the
 // archive entry (stored single-slash). Single-slash paths pass through unchanged.
 std::string normalizeFolder(const std::string& raw) {
-  std::string out;
-  out.reserve(raw.size());
-  for (const char c : raw) {
-    if (c == '/' && !out.empty() && out.back() == '/') continue;
-    out += c;
-  }
+  std::string out = detail::collapseSlashes(raw);
   if (!out.empty() && out.back() == '/') out.pop_back();
   return out;
 }
@@ -127,6 +122,10 @@ ComponentGeometry parseComponentGeometry(const std::string& componentXml) {
         if (!cp.name.empty()) geo.parts.push_back(std::move(cp));
       });
   return geo;
+}
+
+std::string partXmfPath(const std::string& geometryFolder, const std::string& partName) {
+  return geometryFolder + "/" + partName + "-lod0.xmf";
 }
 
 AABB moduleAabb(const std::string& componentXml) {

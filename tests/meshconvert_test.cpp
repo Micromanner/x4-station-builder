@@ -11,6 +11,7 @@
 #include <string>
 #include <system_error>
 #include <unordered_map>
+#include <utility>
 
 using namespace x4sb;
 
@@ -38,11 +39,21 @@ std::string tetraXmf() {
   return std::string(reinterpret_cast<const char*>(kTetraXmf), sizeof(kTetraXmf));
 }
 
+// An ExtractFn backed by an in-memory logical-path -> bytes map (nullopt on miss).
+using FileMap = std::unordered_map<std::string, std::string>;
+ExtractFn extractFrom(std::shared_ptr<FileMap> files) {
+  return [files = std::move(files)](const std::string& path) -> std::optional<std::string> {
+    const auto it = files->find(path);
+    if (it == files->end()) return std::nullopt;
+    return it->second;
+  };
+}
+
 // A fake install with one fully-resolvable module that has two visual parts, plus
 // the real .xmf bytes for each part at the source geometry path the converter and
 // the pipeline derive (geometryFolder + "/" + part.name + "-lod0.xmf").
 ExtractFn makeFakeInstall() {
-  auto files = std::make_shared<std::unordered_map<std::string, std::string>>();
+  auto files = std::make_shared<FileMap>();
   (*files)["libraries/wares.xml"] = R"(<wares>
     <ware id="module_arg_prod_foodrations_01" name="{20104,13401}" tags="module">
       <component ref="prod_arg_foodrations_macro"/>
@@ -80,11 +91,7 @@ ExtractFn makeFakeInstall() {
   // Real mesh bytes at the two source paths the converter resolves.
   (*files)["assets/structures/production/prod_data/part_main-lod0.xmf"] = tetraXmf();
   (*files)["assets/structures/production/prod_data/part_extra-lod0.xmf"] = tetraXmf();
-  return [files](const std::string& path) -> std::optional<std::string> {
-    const auto it = files->find(path);
-    if (it == files->end()) return std::nullopt;
-    return it->second;
-  };
+  return extractFrom(std::move(files));
 }
 
 // Unique scratch dir under the system temp; removed by the RAII guard.
@@ -151,7 +158,7 @@ TEST_CASE("convertModuleMeshes writes exactly the paths buildModuleCatalog recor
 }
 
 TEST_CASE("convertModuleMeshes counts a missing source mesh as failed") {
-  auto files = std::make_shared<std::unordered_map<std::string, std::string>>();
+  auto files = std::make_shared<FileMap>();
   (*files)["libraries/wares.xml"] = R"(<wares>
     <ware id="module_x" name="{1,1}" tags="module"><component ref="x_macro"/></ware>
   </wares>)";
@@ -164,11 +171,7 @@ TEST_CASE("convertModuleMeshes counts a missing source mesh as failed") {
     <connections><connection name="C" tags="part"><parts><part name="p"/></parts></connection></connections>
   </component></components>)";
   // NOTE: no g/x/p-lod0.xmf -> source missing.
-  const ExtractFn extract = [files](const std::string& path) -> std::optional<std::string> {
-    const auto it = files->find(path);
-    if (it == files->end()) return std::nullopt;
-    return it->second;
-  };
+  const ExtractFn extract = extractFrom(std::move(files));
 
   TempDir out;
   const MeshConvertResult conv =

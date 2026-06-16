@@ -54,7 +54,7 @@ MeshConvertResult convertModuleMeshes(const ExtractFn& extract,
             continue;
           }
 
-          const std::string logical = geo.geometryFolder + "/" + part.name + "-lod0.xmf";
+          const std::string logical = partXmfPath(geo.geometryFolder, part.name);
           const std::optional<std::string> meshBytes = extract(logical);
           if (!meshBytes) {
             ++res.failed;
