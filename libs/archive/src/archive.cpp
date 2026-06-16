@@ -43,6 +43,15 @@ bool isSignatureCatalog(const fs::path& p) {
   return stem.size() >= 4 && stem.compare(stem.size() - 4, 4, "_sig") == 0;
 }
 
+// X4's VFS is case-insensitive: the .cat ships paths lower-cased, but a query
+// derived from a component XML may be camelCase (e.g. "anim_cableHolder"). Normalize
+// both sides to lower-case (ASCII; X4 paths are ASCII) so they match.
+std::string toLowerAscii(std::string s) {
+  std::transform(s.begin(), s.end(), s.begin(),
+                 [](unsigned char ch) { return static_cast<char>(std::tolower(ch)); });
+  return s;
+}
+
 std::string readSlice(const std::string& datPath, std::uint64_t offset, std::uint64_t size) {
   std::ifstream in(datPath, std::ios::binary);
   if (!in) return {};
@@ -98,7 +107,8 @@ bool Archive::addCatalog(const std::string& catPath, const std::string& logicalP
   const std::string datPath = swapExtension(catPath, ".dat");
   const CatIndex idx = CatIndex::parse(text);
   for (const auto& e : idx.entries())
-    index_[logicalPrefix + e.path] = Source{datPath, e.offset, e.size};  // later cats overwrite
+    // Lower-cased key so extract()'s case-insensitive lookup matches (later cats overwrite).
+    index_[toLowerAscii(logicalPrefix + e.path)] = Source{datPath, e.offset, e.size};
 
   // Record this prefix once (dedup: linear scan; there are only a handful).
   if (std::find(sources_.begin(), sources_.end(), logicalPrefix) == sources_.end())
@@ -148,11 +158,15 @@ int Archive::addInstall(const std::string& x4Dir) {
 }
 
 std::optional<std::string> Archive::extract(const std::string& path) const {
-  const auto it = index_.find(path);
+  const auto it = index_.find(toLowerAscii(path));
   if (it == index_.end()) return std::nullopt;
   std::string bytes = readSlice(it->second.datPath, it->second.offset, it->second.size);
   if (bytes.size() != it->second.size) return std::nullopt;
   return bytes;
+}
+
+bool Archive::contains(const std::string& path) const {
+  return index_.count(toLowerAscii(path)) != 0;
 }
 
 }  // namespace x4sb

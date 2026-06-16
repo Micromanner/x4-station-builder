@@ -64,6 +64,28 @@ TEST_CASE("Archive extracts bytes from a synthetic cat/dat pair; later catalog w
   fs::remove_all(dir);
 }
 
+TEST_CASE("Archive::extract matches paths case-insensitively (X4's VFS is case-insensitive)") {
+  namespace fs = std::filesystem;
+  const fs::path dir = fs::temp_directory_path() / "x4sb_archive_ci_test";
+  fs::remove_all(dir);
+  fs::create_directories(dir);
+
+  // X4 ships the geometry file lowercase, but a module's component XML can name the
+  // part camelCase ("anim_cableHolder"), so the derived query has mixed case.
+  std::ofstream(dir / "01.cat", std::ios::binary) << "assets/anim_cableholder-lod0.xmf 3 1 aa\n";
+  std::ofstream(dir / "01.dat", std::ios::binary) << "xmf";
+
+  Archive ar;
+  CHECK(ar.addCatalog((dir / "01.cat").string()));
+
+  const auto hit = ar.extract("assets/anim_cableHolder-lod0.xmf");  // mixed-case query
+  REQUIRE(hit.has_value());
+  CHECK(*hit == "xmf");
+  CHECK(ar.contains("ASSETS/ANIM_CABLEHOLDER-LOD0.XMF"));  // contains() is case-insensitive too
+
+  fs::remove_all(dir);
+}
+
 TEST_CASE("Archive::sources() returns distinct prefixes in first-seen order") {
   namespace fs = std::filesystem;
   const fs::path dir = fs::temp_directory_path() / "x4sb_sources_test";

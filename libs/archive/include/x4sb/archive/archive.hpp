@@ -53,10 +53,12 @@ class Archive {
   int addInstall(const std::string& x4Dir);
 
   // Extract a logical path's bytes (latest registered catalog wins). Returns
-  // nullopt if the path is unknown or the .dat read fails.
+  // nullopt if the path is unknown or the .dat read fails. Lookups are
+  // case-insensitive, matching X4's case-insensitive virtual file system (a
+  // component XML may name a part camelCase while the .cat ships it lower-cased).
   std::optional<std::string> extract(const std::string& path) const;
 
-  bool contains(const std::string& path) const { return index_.count(path) != 0; }
+  [[nodiscard]] bool contains(const std::string& path) const;
   std::size_t fileCount() const { return index_.size(); }
 
   // Returns the distinct logical-path prefixes indexed so far, in first-seen
