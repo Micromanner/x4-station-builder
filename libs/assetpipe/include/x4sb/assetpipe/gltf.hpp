@@ -14,6 +14,6 @@ namespace x4sb {
 std::string meshToGltf(const XmfMesh& mesh);
 
 // Write meshToGltf() to a file. Returns false on empty mesh or IO error.
-bool writeGltfFile(const XmfMesh& mesh, const std::string& path);
+[[nodiscard]] bool writeGltfFile(const XmfMesh& mesh, const std::string& path);
 
 }  // namespace x4sb

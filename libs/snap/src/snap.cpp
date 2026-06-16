@@ -13,13 +13,15 @@ const ConnectionPoint* findPoint(const ModuleDef& def, const std::string& id) {
   return nullptr;
 }
 
-// Connector mate convention (spec §3.1 — confirm against the real install before
-// trusting across all modules): two connectors mate by rotating the new module
-// 180deg about local Y, which sends a module-local +Z connector normal to -Z so the
-// normals oppose. Only this mate rotation is a code constant; the +Z normal axis is
-// implicit in this choice (and probed by the snap tests). If real data shows a
-// different convention, change kMate here (and the tests' axis literals).
-const Quat kMate{0.0, 0.0, 1.0, 0.0};  // 180deg about local Y
+// Connector mate convention (spec §3.1 — CONFIRMED against real install assets via the
+// editor's --snaptest harness: two struct_arg_cross_01 hubs mate into a clean,
+// non-overlapping joint with coincident connectors and opposing normals, meshes aligned
+// to their AABBs): two connectors mate by rotating the new module 180deg about local Y,
+// which sends a module-local +Z connector normal to -Z so the normals oppose. Only this
+// mate rotation is a code constant; the +Z normal axis is implicit in this choice (and
+// probed by the snap tests). If a module family ever shows a different convention, change
+// kMate here (and the tests' axis literals + render.cpp's connector-normal axis).
+const Quat kMate{0.0, 0.0, 1.0, 0.0};  // 180deg about local Y (validated)
 
 bool pointIsLinked(const PlacedModule& m, const std::string& pointId) {
   for (const auto& l : m.links)

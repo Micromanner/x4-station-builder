@@ -49,6 +49,13 @@ struct Transform {
 
 inline Vec3 apply(const Transform& t, Vec3 local) { return rotate(t.rotation, local) + t.position; }
 
+// Compose two rigid transforms: the result applies `b` then `a` (i.e. `a` is the
+// parent/world frame, `b` the child/local frame). Equivalent to
+// apply(compose(a,b), v) == apply(a, apply(b, v)) for all v.
+[[nodiscard]] inline Transform compose(const Transform& a, const Transform& b) {
+  return {apply(a, b.position), a.rotation * b.rotation};
+}
+
 // Axis-aligned bounding box.
 struct AABB {
   Vec3 min{};

@@ -20,6 +20,49 @@ TEST_CASE("90 degree rotation about Z maps +X to +Y") {
   CHECK(r.z == doctest::Approx(0).epsilon(1e-9));
 }
 
+TEST_CASE("compose matches applying both transforms in sequence") {
+  // a: parent/world frame — translate then 90deg about Y.
+  Transform a;
+  a.position = Vec3{10, -5, 3};
+  const double s = std::sqrt(2.0) / 2.0;
+  a.rotation = Quat{s, 0, s, 0};  // 90deg about Y
+
+  // b: child/local frame — different translation, 90deg about X.
+  Transform b;
+  b.position = Vec3{-2, 7, 4};
+  b.rotation = Quat{s, s, 0, 0};  // 90deg about X
+
+  const Transform ab = compose(a, b);
+
+  // The defining identity: apply(compose(a,b), v) == apply(a, apply(b, v)).
+  const std::array<Vec3, 4> samples{
+      {Vec3{0, 0, 0}, Vec3{1, 0, 0}, Vec3{0, 1, 0}, Vec3{-3, 2, 5}}};
+  for (const Vec3 v : samples) {
+    const Vec3 viaCompose = apply(ab, v);
+    const Vec3 viaSequence = apply(a, apply(b, v));
+    CHECK(viaCompose.x == doctest::Approx(viaSequence.x));
+    CHECK(viaCompose.y == doctest::Approx(viaSequence.y));
+    CHECK(viaCompose.z == doctest::Approx(viaSequence.z));
+  }
+
+  // Composing with identity on either side is a no-op when applied to points.
+  const Transform left = compose(Transform{}, b);   // identity then b == b
+  const Transform right = compose(a, Transform{});  // a then identity == a
+  for (const Vec3 v : samples) {
+    const Vec3 lc = apply(left, v);
+    const Vec3 bv = apply(b, v);
+    CHECK(lc.x == doctest::Approx(bv.x));
+    CHECK(lc.y == doctest::Approx(bv.y));
+    CHECK(lc.z == doctest::Approx(bv.z));
+
+    const Vec3 rc = apply(right, v);
+    const Vec3 av = apply(a, v);
+    CHECK(rc.x == doctest::Approx(av.x));
+    CHECK(rc.y == doctest::Approx(av.y));
+    CHECK(rc.z == doctest::Approx(av.z));
+  }
+}
+
 TEST_CASE("AABB overlap detection") {
   const AABB a{{0, 0, 0}, {2, 2, 2}};
   const AABB touching{{1, 1, 1}, {3, 3, 3}};

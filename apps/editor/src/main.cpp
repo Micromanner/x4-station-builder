@@ -2,17 +2,20 @@
 // shell: load the catalog, then per frame map input into EditorState (render-free
 // logic in libs/editorcore) and draw it. All scene geometry is in X4 native space;
 // the renderer applies the single (1,1,-1) handedness flip.
+#include "app_paths.hpp"
 #include "input.hpp"
+#include "mesh_cache.hpp"
 #include "orbit_camera.hpp"
 #include "render.hpp"
+#include "snaptest.hpp"
 
 #include "x4sb/data/catalog.hpp"
 #include "x4sb/editorcore/editor_state.hpp"
 
 #include "raylib.h"
 
-#include <array>
 #include <cstdio>
+#include <filesystem>
 #include <optional>
 #include <string>
 
@@ -40,23 +43,6 @@ void stationBounds(const x4sb::EditorState& s, ::Vector3& centerOut, float& radi
   radiusOut = static_cast<float>(x4sb::length(ext) * 0.5);
 }
 
-// Locate asset-cache/catalog.json regardless of the launch directory (CWD or a
-// double-clicked exe). Searches from both the working directory and the
-// executable's directory, walking up a few levels so a build/<preset>/bin/ exe
-// still finds the repo-root cache. Returns the first existing path, or nullopt.
-std::optional<std::string> findCatalogJson() {
-  const std::string rel = "asset-cache/catalog.json";
-  const std::array<std::string, 2> bases{std::string{}, std::string{GetApplicationDirectory()}};
-  const std::array<std::string, 5> ups{"", "../", "../../", "../../../", "../../../../"};
-  for (const auto& base : bases) {
-    for (const auto& up : ups) {
-      const std::string path = base + up + rel;
-      if (FileExists(path.c_str())) return path;
-    }
-  }
-  return std::nullopt;
-}
-
 // Error loop: catalog not found / unparseable. Show what we tried until closed.
 int runCatalogError() {
   while (!WindowShouldClose()) {
@@ -75,49 +61,69 @@ int runCatalogError() {
 }
 }  // namespace
 
-int main() {
+int main(int argc, char** argv) {
+  // Hidden visual-regression harness: `--snaptest <outPrefix>` renders a snapped
+  // pair, screenshots it, and exits (no interactive window). It owns its own
+  // InitWindow/CloseWindow, so dispatch BEFORE the interactive InitWindow below.
+  for (int i = 1; i + 1 < argc; ++i) {
+    if (std::string(argv[i]) == "--snaptest") {
+      return x4sb::editor::runSnapTest(std::string(argv[i + 1]));
+    }
+  }
+
   InitWindow(kScreenW, kScreenH, "X4 Station Builder");
   SetTargetFPS(60);
 
-  const std::optional<std::string> catalogPath = findCatalogJson();
+  const std::optional<std::string> catalogPath = x4sb::editor::findCatalogJson();
   std::optional<x4sb::ModuleCatalog> catalog =
       catalogPath ? x4sb::ModuleCatalog::loadFromFile(*catalogPath) : std::nullopt;
   if (!catalog) return runCatalogError();
 
   x4sb::EditorState state(*catalog);
-  x4sb::editor::OrbitCamera cam;
-  bool showGizmos = true;
 
-  while (!WindowShouldClose()) {
-    cam.update();
-    x4sb::editor::handleKeys(state);
-    if (IsKeyPressed(KEY_G)) showGizmos = !showGizmos;
-    if (IsKeyPressed(KEY_F)) {
-      ::Vector3 c{};
-      float r = 20.0f;
-      stationBounds(state, c, r);
-      cam.frame(c, r);
+  // MeshCache owns raylib Models, so it must be constructed after InitWindow (GL
+  // context required by LoadModel) and destroyed before CloseWindow (UnloadModel
+  // also needs the context). It and the render loop live in this inner block so
+  // the cache's destructor runs at the block's close — before the explicit
+  // CloseWindow() below. Asset-cache root = the directory containing catalog.json.
+  {
+    x4sb::editor::MeshCache meshes{std::filesystem::path(*catalogPath).parent_path()};
+    x4sb::editor::OrbitCamera cam;
+    bool showGizmos = true;
+    bool showMeshes = true;  // render-only state; not in EditorState (that's render-free)
+
+    while (!WindowShouldClose()) {
+      cam.update();
+      x4sb::editor::handleKeys(state);
+      if (IsKeyPressed(KEY_G)) showGizmos = !showGizmos;
+      if (IsKeyPressed(KEY_M)) showMeshes = !showMeshes;
+      if (IsKeyPressed(KEY_F)) {
+        ::Vector3 c{};
+        float r = 20.0f;
+        stationBounds(state, c, r);
+        cam.frame(c, r);
+      }
+
+      // Mouse ray in X4 space drives the ghost preview every frame.
+      x4sb::Vec3 ro{};
+      x4sb::Vec3 rd{};
+      x4sb::editor::mouseRayX4(cam.camera(), ro, rd);
+      state.updateGhost(ro, rd);
+
+      if (IsMouseButtonPressed(MOUSE_BUTTON_LEFT)) {
+        // Commit a valid ghost; otherwise treat the click as a selection.
+        const bool placed = state.ghost().has_value() && state.ghost()->valid &&
+                            state.commitGhost().has_value();
+        if (!placed) state.selectByRay(ro, rd);
+      }
+
+      BeginDrawing();
+      ClearBackground(::Color{30, 30, 38, 255});
+      x4sb::editor::drawScene(state, cam.camera(), meshes, showGizmos, showMeshes);
+      x4sb::editor::drawHud(state, kScreenW, kScreenH, showGizmos);
+      EndDrawing();
     }
-
-    // Mouse ray in X4 space drives the ghost preview every frame.
-    x4sb::Vec3 ro{};
-    x4sb::Vec3 rd{};
-    x4sb::editor::mouseRayX4(cam.camera(), ro, rd);
-    state.updateGhost(ro, rd);
-
-    if (IsMouseButtonPressed(MOUSE_BUTTON_LEFT)) {
-      // Commit a valid ghost; otherwise treat the click as a selection.
-      const bool placed = state.ghost().has_value() && state.ghost()->valid &&
-                          state.commitGhost().has_value();
-      if (!placed) state.selectByRay(ro, rd);
-    }
-
-    BeginDrawing();
-    ClearBackground(::Color{30, 30, 38, 255});
-    x4sb::editor::drawScene(state, cam.camera(), showGizmos);
-    x4sb::editor::drawHud(state, kScreenW, kScreenH, showGizmos);
-    EndDrawing();
-  }
+  }  // meshes destroyed here (UnloadModel) before CloseWindow
 
   CloseWindow();
   return 0;

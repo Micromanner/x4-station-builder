@@ -9,6 +9,7 @@
 #include "x4sb/assetpipe/catalogbuild.hpp"
 #include "x4sb/assetpipe/component.hpp"
 #include "x4sb/assetpipe/gltf.hpp"
+#include "x4sb/assetpipe/meshconvert.hpp"
 #include "x4sb/assetpipe/xmf.hpp"
 #include "x4sb/data/catalog.hpp"
 
@@ -33,9 +34,12 @@ void printUsage(const char* exe) {
             << " [--component <logical/path.xml>]\n\n"
             << "Converts a station module's .xmf part meshes to glTF and reports its\n"
             << "snap connectors.\n"
-            << "  --out        output asset cache (default: " << kDefaultOut << ")\n"
-            << "  --component  module component XML (default: " << kDefaultComponent << ")\n"
-            << "  --catalog    build the full module catalog.json (ignores --component)\n";
+            << "  --out          output asset cache (default: " << kDefaultOut << ")\n"
+            << "  --component    module component XML (default: " << kDefaultComponent << ")\n"
+            << "  --catalog      build the full module catalog.json (ignores --component)\n"
+            << "  --batch-meshes convert every catalog module's part meshes to glTF under "
+               "<out>/meshes/\n"
+            << "  --force        with --batch-meshes, reconvert even if the output exists\n";
 }
 
 // Replace path separators so a logical path becomes a flat output filename.
@@ -166,12 +170,32 @@ int runCatalog(const std::string& x4Path, const std::string& outDir) {
   return 0;
 }
 
+int runBatchMeshes(const std::string& x4Path, const std::string& outDir, bool force) {
+  std::optional<Archive> installed = openInstall(x4Path);
+  if (!installed) return 1;
+  Archive& archive = *installed;
+
+  const ExtractFn extract = [&archive](const std::string& path) { return archive.extract(path); };
+  const auto log = [](const std::string& m) { std::cout << "  " << m << "\n"; };
+  const MeshConvertResult res = convertModuleMeshes(extract, archive.sources(), outDir, force, log);
+  if (res.modules == 0) {
+    std::cerr << "error: no modules resolved (is libraries/wares.xml present?)\n";
+    return 1;
+  }
+
+  std::cout << "\nmodules " << res.modules << ", converted " << res.converted << ", skipped "
+            << res.skipped << ", failed " << res.failed << "\n";
+  return 0;
+}
+
 }  // namespace
 
 int main(int argc, char** argv) {
   std::vector<std::string> args(argv + 1, argv + argc);
   std::string x4Path, outDir = kDefaultOut, componentPath = kDefaultComponent;
   bool catalog = false;
+  bool batchMeshes = false;
+  bool force = false;
 
   for (std::size_t i = 0; i < args.size(); ++i) {
     if (args[i] == "--x4" && i + 1 < args.size()) {
@@ -182,6 +206,10 @@ int main(int argc, char** argv) {
       componentPath = args[++i];
     } else if (args[i] == "--catalog") {
       catalog = true;
+    } else if (args[i] == "--batch-meshes") {
+      batchMeshes = true;
+    } else if (args[i] == "--force") {
+      force = true;
     } else if (args[i] == "-h" || args[i] == "--help") {
       printUsage(argv[0]);
       return 0;
@@ -192,6 +220,7 @@ int main(int argc, char** argv) {
     printUsage(argv[0]);
     return args.empty() ? 0 : 2;
   }
+  if (batchMeshes) return runBatchMeshes(x4Path, outDir, force);
   if (catalog) return runCatalog(x4Path, outDir);
   return run(x4Path, outDir, componentPath);
 }

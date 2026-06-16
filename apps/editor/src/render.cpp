@@ -1,5 +1,6 @@
 #include "render.hpp"
 
+#include "mesh_cache.hpp"
 #include "raylib_convert.hpp"
 #include "rlgl.h"
 
@@ -7,6 +8,7 @@
 
 #include <algorithm>
 #include <cstdio>
+#include <optional>
 #include <string>
 
 namespace x4sb::editor {
@@ -42,6 +44,24 @@ void drawModuleBox(const ModuleDef& def, const Transform& xf, ::Color fill, ::Co
   rlPopMatrix();
 }
 
+// Draw `def`'s glTF parts as wireframes under `xf`, each part nested in its own
+// localTransform. Returns true if at least one mesh drew; false (no mesh loaded)
+// signals the caller to fall back to the AABB box. Wireframe is winding-
+// independent, so the global culling state need not change.
+bool drawModuleMeshes(const ModuleDef& def, const Transform& xf, MeshCache& meshes, ::Color tint) {
+  bool drew = false;
+  for (const MeshRef& ref : def.meshRefs) {
+    const ::Model* model = meshes.get(ref.gltfPath);
+    if (model == nullptr) continue;
+    rlPushMatrix();
+    rlMultMatrixf(MatrixToFloatV(toRlMatrix(compose(xf, ref.localTransform))).v);
+    DrawModelWires(*model, ::Vector3{0, 0, 0}, 1.0f, tint);
+    rlPopMatrix();
+    drew = true;
+  }
+  return drew;
+}
+
 void drawConnectors(const ModuleDef& def, const PlacedModule& pm) {
   for (const auto& cp : def.connectionPoints) {
     const Vec3 world = apply(pm.worldTransform, cp.localPosition);
@@ -75,9 +95,11 @@ void drawAxisGizmo(const ModuleDef& def, const Transform& xf) {
   DrawSphere(toRl(fwd), static_cast<float>(maxExt) * 0.04f, BLUE);  // +Z forward tip
 }
 
-}  // namespace
-
-void drawScene(const EditorState& state, const ::Camera3D& camera, bool showGizmos) {
+// Begin the 3D scene: X4-scale clip planes, the global (1,1,-1) handedness flip
+// + culling-off, and the translucent 20km build-volume plot box. Pairs with
+// endScene(). Shared by both drawScene overloads so the interactive path and the
+// --snaptest harness render through identical setup.
+void beginScene(const ::Camera3D& camera) {
   // X4 modules span tens to ~1500 units, far past raylib's default 1000-unit far
   // plane. Push the clip planes out to X4 scale so geometry isn't clipped (must
   // be set before BeginMode3D, which builds the projection from these).
@@ -96,15 +118,41 @@ void drawScene(const EditorState& state, const ::Camera3D& camera, bool showGizm
   const ::Vector3 plotExtent{kPlotSize, kPlotSize, kPlotSize};
   DrawCubeV(plotCenter, plotExtent, ::Color{50, 120, 210, 16});
   DrawCubeWiresV(plotCenter, plotExtent, ::Color{70, 150, 240, 220});
+}
 
-  for (const auto& pm : state.station().modules()) {
-    const ModuleDef* def = state.defFor(pm.defId);
+void endScene() {
+  rlEnableBackfaceCulling();
+  rlPopMatrix();
+  EndMode3D();
+}
+
+// Draw every placed module (mesh wireframe with box fallback, connectors, gizmo).
+// `selected` highlights one instance in yellow; pass nullopt for none.
+void drawPlacedModules(const Station& station, const ModuleCatalog& catalog,
+                       std::optional<InstanceId> selected, MeshCache& meshes, bool showGizmos,
+                       bool showMeshes) {
+  for (const auto& pm : station.modules()) {
+    const ModuleDef* def = catalog.find(pm.defId);
     if (def == nullptr) continue;
-    const bool sel = state.selected().has_value() && *state.selected() == pm.instanceId;
-    drawModuleBox(*def, pm.worldTransform, ::Color{120, 160, 200, 90}, sel ? YELLOW : DARKBLUE);
+    const bool sel = selected.has_value() && *selected == pm.instanceId;
+    // Mesh wireframe when enabled, else (or if no mesh loads) the AABB box.
+    const ::Color wire = sel ? YELLOW : LIGHTGRAY;
+    if (!showMeshes || !drawModuleMeshes(*def, pm.worldTransform, meshes, wire)) {
+      drawModuleBox(*def, pm.worldTransform, ::Color{120, 160, 200, 90}, sel ? YELLOW : DARKBLUE);
+    }
     drawConnectors(*def, pm);
     if (showGizmos) drawAxisGizmo(*def, pm.worldTransform);
   }
+}
+
+}  // namespace
+
+void drawScene(const EditorState& state, const ::Camera3D& camera, MeshCache& meshes,
+               bool showGizmos, bool showMeshes) {
+  beginScene(camera);
+
+  drawPlacedModules(state.station(), state.catalog(), state.selected(), meshes, showGizmos,
+                    showMeshes);
 
   if (state.ghost()) {
     const ModuleDef* gdef = state.defFor(state.ghost()->defId);
@@ -112,14 +160,22 @@ void drawScene(const EditorState& state, const ::Camera3D& camera, bool showGizm
       const ::Color fill =
           state.ghost()->valid ? ::Color{0, 220, 0, 90} : ::Color{220, 0, 0, 90};
       const ::Color edge = state.ghost()->valid ? GREEN : RED;
-      drawModuleBox(*gdef, state.ghost()->worldTransform, fill, edge);
+      if (!showMeshes ||
+          !drawModuleMeshes(*gdef, state.ghost()->worldTransform, meshes, edge)) {
+        drawModuleBox(*gdef, state.ghost()->worldTransform, fill, edge);
+      }
       if (showGizmos) drawAxisGizmo(*gdef, state.ghost()->worldTransform);
     }
   }
 
-  rlEnableBackfaceCulling();
-  rlPopMatrix();
-  EndMode3D();
+  endScene();
+}
+
+void drawScene(const Station& station, const ModuleCatalog& catalog, const ::Camera3D& camera,
+               MeshCache& meshes, bool showGizmos, bool showMeshes) {
+  beginScene(camera);
+  drawPlacedModules(station, catalog, std::nullopt, meshes, showGizmos, showMeshes);
+  endScene();
 }
 
 void drawHud(const EditorState& state, int screenWidth, int /*screenHeight*/, bool showGizmos) {
@@ -139,8 +195,9 @@ void drawHud(const EditorState& state, int screenWidth, int /*screenHeight*/, bo
                 showGizmos ? "on" : "off");
   DrawText(line, 12, 56, 16, LIGHTGRAY);
 
-  DrawText("[ / ]=cycle    1=Prod 2=Stor 3=Hab 4=Dock 5=Def 6=Conn 7=Other    0=all    G=gizmos",
-           12, 78, 14, GRAY);
+  DrawText(
+      "[ / ]=cycle  1=Prod 2=Stor 3=Hab 4=Dock 5=Def 6=Conn 7=Other  0=all  G=gizmos  M=mesh/box",
+      12, 78, 14, GRAY);
   DrawText("LMB=place/select   Del or X=delete   Ctrl+Z/Y=undo/redo   RMB=orbit   wheel=zoom   F=frame",
            12, 96, 14, GRAY);
 

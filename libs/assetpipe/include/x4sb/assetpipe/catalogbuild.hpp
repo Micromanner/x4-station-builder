@@ -30,4 +30,9 @@ struct CatalogBuildResult {
 [[nodiscard]] CatalogBuildResult buildModuleCatalog(
     const ExtractFn& extract, const std::vector<std::string>& sourcePrefixes);
 
+// The cache-relative glTF path the catalog records for a module's part mesh:
+// "meshes/<moduleId>__<partName>.gltf". The single source of truth shared by the
+// catalog builder and the batch mesh converter so their paths cannot drift.
+[[nodiscard]] std::string meshGltfPath(const std::string& moduleId, const std::string& partName);
+
 }  // namespace x4sb

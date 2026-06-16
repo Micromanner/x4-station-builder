@@ -15,7 +15,8 @@ add_executable(x4sb_tests
   platform_test.cpp
   moduleindex_test.cpp
   wares_test.cpp
-  catalogbuild_test.cpp)
+  catalogbuild_test.cpp
+  meshconvert_test.cpp)
 
 target_link_libraries(x4sb_tests PRIVATE
   doctest::doctest

@@ -63,6 +63,8 @@ class EditorState {
 
   // ── Read access for the renderer ────────────────────────────────────────
   [[nodiscard]] const Station& station() const { return station_; }
+  // The catalog this state was built with (for the renderer's def lookups).
+  [[nodiscard]] const ModuleCatalog& catalog() const { return catalog_; }
   // Resolve a module definition from the catalog this state was built with.
   [[nodiscard]] const ModuleDef* defFor(const std::string& defId) const;
 

@@ -2,9 +2,12 @@
 # dedicated C TU (raygui_impl.c) provides its implementation.
 add_executable(x4sb-editor
   src/main.cpp
+  src/app_paths.cpp
   src/orbit_camera.cpp
   src/render.cpp
   src/input.cpp
+  src/mesh_cache.cpp
+  src/snaptest.cpp
   src/raygui_impl.c)
 
 # SYSTEM so the first-party -Werror harness ignores warnings from the raygui header.

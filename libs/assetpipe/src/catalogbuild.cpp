@@ -1,5 +1,6 @@
 #include "x4sb/assetpipe/catalogbuild.hpp"
 
+#include "modulewalk.hpp"
 #include "strutil.hpp"
 
 #include "x4sb/assetpipe/component.hpp"
@@ -12,10 +13,12 @@
 
 namespace x4sb {
 
-CatalogBuildResult buildModuleCatalog(const ExtractFn& extract,
-                                      const std::vector<std::string>& sourcePrefixes) {
-  CatalogBuildResult res;
+namespace detail {
 
+void forEachResolvedModule(const ExtractFn& extract,
+                           const std::vector<std::string>& sourcePrefixes,
+                           const std::function<void(const ResolvedModule&)>& visit,
+                           std::vector<std::string>& skipped) {
   // Accumulate wares and merge the macro/component indexes across the base game
   // and every DLC overlay. DLC index values are already fully-qualified archive
   // paths, so one merged map resolves modules from any source.
@@ -34,10 +37,10 @@ CatalogBuildResult buildModuleCatalog(const ExtractFn& extract,
       for (const auto& entry : parseModuleIndex(*compsXml)) compIdx[entry.first] = entry.second;
     }
   }
-  if (wares.empty()) return res;
+  if (wares.empty()) return;
 
   for (const WareModule& w : wares) {
-    const auto skip = [&](const std::string& why) { res.skipped.push_back(w.wareId + ": " + why); };
+    const auto skip = [&](const std::string& why) { skipped.push_back(w.wareId + ": " + why); };
 
     const auto macroIt = macroIdx.find(detail::toLower(w.macroRef));
     if (macroIt == macroIdx.end()) {
@@ -65,25 +68,47 @@ CatalogBuildResult buildModuleCatalog(const ExtractFn& extract,
       continue;
     }
 
-    ModuleDef d;
-    d.id = detail::toLower(mi.macroName.empty() ? w.macroRef : mi.macroName);
-    d.wareId = w.wareId;
-    d.nameRef = w.nameRef;
-    d.faction = mi.makerRace;
-    d.category = mi.category;
-    d.playerBuildable = w.playerBuildable;
-    d.connectionPoints = snapConnectionPoints(*componentXml);
-    d.aabb = moduleAabb(*componentXml);
-
-    const ComponentGeometry geo = parseComponentGeometry(*componentXml);
-    for (const ComponentPart& p : geo.parts) {
-      MeshRef mr;
-      mr.gltfPath = "meshes/" + d.id + "__" + p.name + ".gltf";
-      mr.localTransform = p.offset;
-      d.meshRefs.push_back(std::move(mr));
-    }
-    res.modules.push_back(std::move(d));
+    ResolvedModule rm;
+    rm.id = detail::toLower(mi.macroName.empty() ? w.macroRef : mi.macroName);
+    rm.componentXml = *componentXml;
+    rm.ware = &w;
+    rm.macro = &mi;
+    visit(rm);
   }
+}
+
+}  // namespace detail
+
+std::string meshGltfPath(const std::string& moduleId, const std::string& partName) {
+  return "meshes/" + moduleId + "__" + partName + ".gltf";
+}
+
+CatalogBuildResult buildModuleCatalog(const ExtractFn& extract,
+                                      const std::vector<std::string>& sourcePrefixes) {
+  CatalogBuildResult res;
+  detail::forEachResolvedModule(
+      extract, sourcePrefixes,
+      [&res](const detail::ResolvedModule& rm) {
+        ModuleDef d;
+        d.id = rm.id;
+        d.wareId = rm.ware->wareId;
+        d.nameRef = rm.ware->nameRef;
+        d.faction = rm.macro->makerRace;
+        d.category = rm.macro->category;
+        d.playerBuildable = rm.ware->playerBuildable;
+        d.connectionPoints = snapConnectionPoints(rm.componentXml);
+        d.aabb = moduleAabb(rm.componentXml);
+
+        const ComponentGeometry geo = parseComponentGeometry(rm.componentXml);
+        for (const ComponentPart& p : geo.parts) {
+          MeshRef mr;
+          mr.gltfPath = meshGltfPath(d.id, p.name);
+          mr.localTransform = p.offset;
+          d.meshRefs.push_back(std::move(mr));
+        }
+        res.modules.push_back(std::move(d));
+      },
+      res.skipped);
   return res;
 }
 

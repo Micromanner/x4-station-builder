@@ -27,6 +27,22 @@ Vec3 readXyz(const pugi::xml_node& n) {
           n.attribute("z").as_double()};
 }
 
+// Normalize a '/'-separated logical folder: collapse runs of '/' to one and
+// strip a trailing '/'. Some component <source geometry> values are authored
+// with a stray double-backslash (e.g. "...\landmarks\\foo_data"), which becomes
+// "...landmarks//foo_data" after the '\'->'/' pass and no longer matches the
+// archive entry (stored single-slash). Single-slash paths pass through unchanged.
+std::string normalizeFolder(const std::string& raw) {
+  std::string out;
+  out.reserve(raw.size());
+  for (const char c : raw) {
+    if (c == '/' && !out.empty() && out.back() == '/') continue;
+    out += c;
+  }
+  if (!out.empty() && out.back() == '/') out.pop_back();
+  return out;
+}
+
 Transform parseOffset(const pugi::xml_node& conn) {
   Transform t;  // identity (position 0, rotation 1,0,0,0)
   const pugi::xml_node off = conn.child("offset");
@@ -100,7 +116,8 @@ ComponentGeometry parseComponentGeometry(const std::string& componentXml) {
   const pugi::xml_node comp = doc.child("components").child("component");
   std::string folder = comp.child("source").attribute("geometry").as_string();
   std::replace(folder.begin(), folder.end(), '\\', '/');  // X4 uses backslashes
-  geo.geometryFolder = folder;
+  // Collapse a stray '//' (double-backslash in the source) and trailing '/'.
+  geo.geometryFolder = normalizeFolder(folder);
 
   forEachComponentPart(
       comp, [&geo](const pugi::xml_node& part, const Transform& offset, const std::string&) {

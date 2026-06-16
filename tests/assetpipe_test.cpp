@@ -2,6 +2,8 @@
 
 #include <doctest/doctest.h>
 
+#include <string>
+
 using namespace x4sb;
 
 // Synthetic fixtures modelled on the real X4 schema (NOT extracted game assets —
@@ -147,4 +149,34 @@ TEST_CASE("moduleAabb ignores nocollision parts") {
   CHECK(box.max.y == doctest::Approx(50));
   CHECK(box.min.z == doctest::Approx(-100));
   CHECK(box.max.z == doctest::Approx(100));
+}
+
+TEST_CASE("parseComponentGeometry reads the geometry folder and parts (good case unchanged)") {
+  const ComponentGeometry geo = parseComponentGeometry(kComponentXml);
+  // A normal single-slash path must pass through untouched.
+  CHECK(geo.geometryFolder == "assets/test/test_cube_01_data");
+  REQUIRE(geo.parts.size() == 1);
+  CHECK(geo.parts[0].name == "part_main");
+}
+
+TEST_CASE("parseComponentGeometry normalizes a double-backslash / trailing-slash source path") {
+  // Real X4 dock/landmark modules author geometry with a stray double-backslash
+  // (e.g. struct "...\landmarks\\foo_data"); after the '\'->'/' pass that becomes
+  // "...landmarks//foo_data", which no longer matches the single-slash archive
+  // entry. parseComponentGeometry must collapse the run and strip a trailing '/'.
+  const char* xml = R"(<?xml version="1.0"?>
+<components>
+  <component name="dockarea_xen_m_station_01" class="dockarea">
+    <source geometry="assets\structures\landmarks\\dockarea_xen_m_station_01_data\"/>
+    <connections>
+      <connection name="C" tags="part"><parts><part name="part_main"/></parts></connection>
+    </connections>
+  </component>
+</components>)";
+  const ComponentGeometry geo = parseComponentGeometry(xml);
+  CHECK(geo.geometryFolder == "assets/structures/landmarks/dockarea_xen_m_station_01_data");
+  CHECK(geo.geometryFolder.find("//") == std::string::npos);  // no double-slash left
+  CHECK(geo.geometryFolder.back() != '/');                    // no trailing slash
+  REQUIRE(geo.parts.size() == 1);
+  CHECK(geo.parts[0].name == "part_main");
 }

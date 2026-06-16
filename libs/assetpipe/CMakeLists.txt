@@ -2,6 +2,7 @@
 # Render-free; pipeline.exe is a thin CLI over it.
 add_library(x4sb_assetpipe STATIC
   src/catalogbuild.cpp
+  src/meshconvert.cpp
   src/component.cpp
   src/moduleindex.cpp
   src/wares.cpp

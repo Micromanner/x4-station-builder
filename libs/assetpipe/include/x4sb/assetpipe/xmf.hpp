@@ -22,6 +22,6 @@ struct XmfMesh {
 
 // Parse a whole .xmf file's bytes. Returns nullopt if the data is not a valid
 // XUMF mesh (bad magic, truncated, or a buffer fails to decompress).
-std::optional<XmfMesh> parseXmf(const std::string& bytes);
+[[nodiscard]] std::optional<XmfMesh> parseXmf(const std::string& bytes);
 
 }  // namespace x4sb
