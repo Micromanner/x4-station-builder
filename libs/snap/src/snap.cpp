@@ -1,5 +1,9 @@
 #include "x4sb/snap/snap.hpp"
 
+#include "x4sb/document/commands.hpp"
+
+#include <memory>
+
 namespace x4sb {
 namespace {
 
@@ -8,6 +12,14 @@ const ConnectionPoint* findPoint(const ModuleDef& def, const std::string& id) {
     if (cp.id == id) return &cp;
   return nullptr;
 }
+
+// Connector mate convention (spec §3.1 — confirm against the real install before
+// trusting across all modules): two connectors mate by rotating the new module
+// 180deg about local Y, which sends a module-local +Z connector normal to -Z so the
+// normals oppose. Only this mate rotation is a code constant; the +Z normal axis is
+// implicit in this choice (and probed by the snap tests). If real data shows a
+// different convention, change kMate here (and the tests' axis literals).
+const Quat kMate{0.0, 0.0, 1.0, 0.0};  // 180deg about local Y
 
 bool pointIsLinked(const PlacedModule& m, const std::string& pointId) {
   for (const auto& l : m.links)
@@ -26,10 +38,6 @@ bool compatible(const ConnectionPoint& a, const ConnectionPoint& b) {
 Transform computeSnapTransform(const Station& station, const ModuleCatalog& catalog,
                                InstanceId targetInstanceId, const std::string& targetPointId,
                                const ModuleDef& newDef, const std::string& newPointId) {
-  // TODO(snap): full solve — orient newDef so its connector axis opposes the
-  // target's (the 180° flip), then translate. Baseline keeps identity rotation
-  // and only translates so the two points coincide; this already satisfies the
-  // "points coincide" invariant and unblocks the rest of the pipeline.
   Transform out;
   const PlacedModule* target = station.find(targetInstanceId);
   if (!target) return out;
@@ -39,8 +47,13 @@ Transform computeSnapTransform(const Station& station, const ModuleCatalog& cata
   const ConnectionPoint* np = findPoint(newDef, newPointId);
   if (!tp || !np) return out;
 
+  // Approach A (spec §3): the new connector's world frame = the target connector's
+  // world frame composed with the 180deg mate, so the two normals oppose. Then
+  // translate so the connector points coincide.
+  const Quat targetFrame = target->worldTransform.rotation * tp->localRotation;
+  out.rotation = targetFrame * kMate * conjugate(np->localRotation);
+
   const Vec3 targetWorld = apply(target->worldTransform, tp->localPosition);
-  out.rotation = Quat{};  // identity (baseline)
   out.position = targetWorld - rotate(out.rotation, np->localPosition);
   return out;
 }
@@ -73,17 +86,37 @@ std::optional<SnapCandidate> findSnapCandidate(const ModuleDef& newDef, Vec3 cur
 bool collidesWithStation(const ModuleDef& def, const Transform& worldTransform,
                          InstanceId ignoreInstanceId, const Station& station,
                          const ModuleCatalog& catalog) {
-  // TODO(snap): rotation-aware world AABB (or OBB per spec §6). Baseline only
-  // translates the local AABB, which is exact while rotation is identity.
-  const AABB a = def.aabb + worldTransform.position;
+  const AABB a = worldAabb(def.aabb, worldTransform);
   for (const auto& placed : station.modules()) {
     if (placed.instanceId == ignoreInstanceId) continue;
     const ModuleDef* other = catalog.find(placed.defId);
     if (!other) continue;
-    const AABB b = other->aabb + placed.worldTransform.position;
+    const AABB b = worldAabb(other->aabb, placed.worldTransform);
     if (overlaps(a, b)) return true;
   }
   return false;
+}
+
+std::unique_ptr<Command> makeSnapPlacement(const ModuleDef& newDef, Vec3 cursorWorldPos,
+                                           const Station& station, const ModuleCatalog& catalog,
+                                           double radius) {
+  const std::optional<SnapCandidate> cand =
+      findSnapCandidate(newDef, cursorWorldPos, station, catalog, radius);
+  if (!cand) return nullptr;
+
+  // Precondition: cand came from findSnapCandidate, so the target + both points
+  // resolve; computeSnapTransform cannot hit its identity-on-miss fallback here.
+  const Transform xf = computeSnapTransform(station, catalog, cand->instanceId,
+                                            cand->targetPointId, newDef, cand->newPointId);
+  // NOTE: only the joint partner is excluded from the collision test. In a dense
+  // station the new module's conservative world-AABB may overlap an already-placed
+  // neighbour of the target and be rejected here. Acceptable for manual placement;
+  // auto-layout / tight chains may need OBB-precise collision (spec §6) or a
+  // multi-id ignore set. TODO(snap): revisit when auto-layout lands.
+  if (collidesWithStation(newDef, xf, cand->instanceId, station, catalog)) return nullptr;
+
+  return std::make_unique<PlaceModuleCommand>(newDef.id, xf, cand->instanceId, cand->newPointId,
+                                              cand->targetPointId);  // (..., newPointId, targetPointId)
 }
 
 }  // namespace x4sb

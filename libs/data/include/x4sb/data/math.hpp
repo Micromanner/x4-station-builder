@@ -3,7 +3,9 @@
 // Deliberately independent of raylib so the logic units test headlessly;
 // conversion to raylib's types happens only inside apps/editor.
 #include <algorithm>
+#include <array>
 #include <cmath>
+#include <cstddef>
 
 namespace x4sb {
 
@@ -72,5 +74,19 @@ inline AABB merge(const AABB& a, const AABB& b) {
 
 // Translate box by t (axes are unchanged, so the result stays axis-aligned).
 inline AABB operator+(const AABB& b, Vec3 t) { return {b.min + t, b.max + t}; }
+
+// World-space axis-aligned hull of a local box after a rigid transform: transform
+// all 8 corners, then take their component-wise min/max. Conservative (>= the true
+// rotated box), which is the safe direction for a collision-reject test.
+[[nodiscard]] inline AABB worldAabb(const AABB& local, const Transform& t) {
+  const std::array<Vec3, 8> corners{{
+      {local.min.x, local.min.y, local.min.z}, {local.max.x, local.min.y, local.min.z},
+      {local.min.x, local.max.y, local.min.z}, {local.max.x, local.max.y, local.min.z},
+      {local.min.x, local.min.y, local.max.z}, {local.max.x, local.min.y, local.max.z},
+      {local.min.x, local.max.y, local.max.z}, {local.max.x, local.max.y, local.max.z}}};
+  AABB out{apply(t, corners[0]), apply(t, corners[0])};
+  for (std::size_t i = 1; i < corners.size(); ++i) expand(out, apply(t, corners[i]));
+  return out;
+}
 
 }  // namespace x4sb

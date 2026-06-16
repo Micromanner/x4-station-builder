@@ -4,6 +4,7 @@ add_executable(x4sb_tests
   coords_test.cpp
   document_test.cpp
   snap_test.cpp
+  pick_test.cpp
   archive_test.cpp
   assetpipe_test.cpp
   xmf_test.cpp
