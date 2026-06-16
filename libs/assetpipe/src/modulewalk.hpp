@@ -9,6 +9,7 @@
 #include "x4sb/assetpipe/wares.hpp"
 
 #include <functional>
+#include <optional>
 #include <string>
 #include <vector>
 
@@ -22,6 +23,10 @@ struct ResolvedModule {
   std::string componentXml;  // bytes of the resolved component XML
   const WareModule* ware{};  // the originating ware (non-owning; valid during visit)
   const MacroInfo* macro{};  // parsed macro identity (non-owning; valid during visit)
+  // Resolve a referenced component's geometry folder, for xref parts whose mesh
+  // lives in another component. nullopt if it isn't indexed or has no geometry.
+  // Backed by the walk's component index; valid only during the visit call.
+  std::function<std::optional<std::string>(const std::string&)> resolveComponentFolder;
 };
 
 // Resolve every buildable station module across the given source overlays

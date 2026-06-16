@@ -69,12 +69,26 @@ MeshConvertResult convertModuleMeshes(const ExtractFn& extract,
             continue;
           }
 
+          // An xref part's mesh lives in another component's folder (pier/dock
+          // modules instance shared sub-assemblies); resolve it, else use the
+          // module's own geometry folder and the part's local name.
+          std::string srcFolder = geo.geometryFolder;
+          std::string srcName = part.name;
+          if (const std::optional<PartRef> pr = parsePartRef(part.ref)) {
+            const std::optional<std::string> f =
+                rm.resolveComponentFolder ? rm.resolveComponentFolder(pr->component) : std::nullopt;
+            if (f) {
+              srcFolder = *f;
+              srcName = pr->part;
+            }
+          }
+
           // Pick the most-detailed LOD that fits raylib's u16 index limit. lod0 is
           // the common case (most parts have no lower LOD and already fit), so only
           // probe lod1-3 when lod0 is missing or too dense — keeps the batch fast.
           std::array<std::optional<std::string>, 4> lodBytes;
           std::array<std::optional<std::uint32_t>, 4> lodCounts;
-          lodBytes[0] = extract(partXmfPathLod(geo.geometryFolder, part.name, 0));
+          lodBytes[0] = extract(partXmfPathLod(srcFolder, srcName, 0));
           if (lodBytes[0]) lodCounts[0] = xmfVertexCount(*lodBytes[0]);
 
           int chosen = 0;
@@ -82,7 +96,7 @@ MeshConvertResult convertModuleMeshes(const ExtractFn& extract,
           if (!lod0Fits) {
             for (int lod = 1; lod < 4; ++lod) {
               const auto idx = static_cast<std::size_t>(lod);
-              lodBytes[idx] = extract(partXmfPathLod(geo.geometryFolder, part.name, lod));
+              lodBytes[idx] = extract(partXmfPathLod(srcFolder, srcName, lod));
               if (lodBytes[idx]) lodCounts[idx] = xmfVertexCount(*lodBytes[idx]);
             }
             const std::optional<int> pick = chooseMeshLod(lodCounts, kU16VertexLimit);

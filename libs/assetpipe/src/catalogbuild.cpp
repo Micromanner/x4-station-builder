@@ -39,6 +39,24 @@ void forEachResolvedModule(const ExtractFn& extract,
   }
   if (wares.empty()) return;
 
+  // Resolve a referenced component's geometry folder for xref parts (cached: pier
+  // modules instance the same sub-assembly many times). Shared across all visits.
+  std::unordered_map<std::string, std::optional<std::string>> folderCache;
+  const auto resolveFolder =
+      [&compIdx, &extract, &folderCache](const std::string& component) -> std::optional<std::string> {
+    const std::string key = detail::toLower(component);
+    if (const auto cached = folderCache.find(key); cached != folderCache.end()) return cached->second;
+    std::optional<std::string> folder;
+    if (const auto it = compIdx.find(key); it != compIdx.end()) {
+      if (const std::optional<std::string> xml = extract(it->second)) {
+        std::string f = parseComponentGeometry(*xml).geometryFolder;
+        if (!f.empty()) folder = std::move(f);
+      }
+    }
+    folderCache.emplace(key, folder);
+    return folder;
+  };
+
   for (const WareModule& w : wares) {
     const auto skip = [&](const std::string& why) { skipped.push_back(w.wareId + ": " + why); };
 
@@ -73,6 +91,7 @@ void forEachResolvedModule(const ExtractFn& extract,
     rm.componentXml = *componentXml;
     rm.ware = &w;
     rm.macro = &mi;
+    rm.resolveComponentFolder = resolveFolder;
     visit(rm);
   }
 }

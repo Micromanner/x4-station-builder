@@ -141,12 +141,19 @@ ComponentGeometry parseComponentGeometry(const std::string& componentXml) {
       comp, [&geo](const pugi::xml_node& part, const Transform& offset, const std::string&) {
         ComponentPart cp;
         cp.name = part.attribute("name").as_string();
+        cp.ref = part.attribute("ref").as_string();  // xref to a shared sub-assembly, if any
         cp.offset = offset;
         // Drop effects and non-visual helpers here, the one chokepoint both the
         // catalog (mesh-refs) and the converter walk, so neither references them.
         if (!cp.name.empty() && isVisualPart(cp.name)) geo.parts.push_back(std::move(cp));
       });
   return geo;
+}
+
+std::optional<PartRef> parsePartRef(std::string_view ref) {
+  const auto dot = ref.find('.');  // "<component>.<part>"; names hold no '.', so first split is exact
+  if (dot == std::string_view::npos || dot == 0 || dot + 1 >= ref.size()) return std::nullopt;
+  return PartRef{std::string(ref.substr(0, dot)), std::string(ref.substr(dot + 1))};
 }
 
 std::string partXmfPath(const std::string& geometryFolder, const std::string& partName) {

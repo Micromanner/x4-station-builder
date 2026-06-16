@@ -4,6 +4,7 @@
 // identity the data layer needs. Render-free; the pipeline.exe and tests share it.
 #include "x4sb/data/types.hpp"
 
+#include <optional>
 #include <string>
 #include <string_view>
 #include <vector>
@@ -33,9 +34,23 @@ std::vector<ConnectionPoint> snapConnectionPoints(const std::string& componentXm
 // One visual part mesh of a module (a <connection tags="part ...">/<parts>/<part>),
 // with the local offset at which it is mounted on the module.
 struct ComponentPart {
-  std::string name;  // e.g. "part_main" -> mesh file "<geometry>/part_main-lod0.xmf"
+  std::string name;  // local instance name, e.g. "part_main" or "part_main01"
+  std::string ref;   // cross-ref "<component>.<part>" when the geometry lives in
+                     // another component (pier/dock sub-assemblies); else empty
   Transform offset{};
 };
+
+// A cross-reference part `ref` split into its component and part names.
+struct PartRef {
+  std::string component;
+  std::string part;
+};
+
+// Split a `<part ref="...">` value ("<component>.<part>") used by pier/dock modules
+// that instance a shared sub-assembly: the part's mesh lives in the referenced
+// component's geometry folder, not the host module's. Returns nullopt if `ref` is
+// empty or has no component/part separator.
+[[nodiscard]] std::optional<PartRef> parsePartRef(std::string_view ref);
 
 // Where a component's meshes live and which parts assemble it.
 struct ComponentGeometry {

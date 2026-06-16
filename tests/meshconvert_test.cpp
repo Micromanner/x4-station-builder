@@ -205,6 +205,40 @@ TEST_CASE("convertModuleMeshes falls back to a lower LOD when lod0 is absent") {
   CHECK(fs::exists(out.path / meshGltfPath("y_macro", "part_main")));
 }
 
+TEST_CASE("convertModuleMeshes resolves an xref part's mesh from the referenced component") {
+  auto files = std::make_shared<FileMap>();
+  (*files)["libraries/wares.xml"] = R"(<wares>
+    <ware id="module_pier" name="{1,1}" tags="module"><component ref="pier_macro"/></ware>
+  </wares>)";
+  (*files)["index/macros.xml"] = R"(<index><entry name="pier_macro" value="m/pier"/></index>)";
+  // The component index must resolve BOTH the module's component and the xref target.
+  (*files)["index/components.xml"] = R"(<index>
+    <entry name="pier_comp" value="c/pier"/>
+    <entry name="xref_bay" value="c/xref_bay"/>
+  </index>)";
+  (*files)["m/pier.xml"] =
+      R"(<macros><macro name="pier_macro" class="dockarea"><component ref="pier_comp"/></macro></macros>)";
+  // The pier's own folder has no inst mesh; the geometry lives in xref_bay.
+  (*files)["c/pier.xml"] = R"(<components><component name="pier_comp">
+    <source geometry="g/pier"/>
+    <connections><connection name="C" tags="part"><parts>
+      <part ref="xref_bay.part_main" name="part_main01"/>
+    </parts></connection></connections>
+  </component></components>)";
+  (*files)["c/xref_bay.xml"] =
+      R"(<components><component name="xref_bay"><source geometry="g/baydata"/></component></components>)";
+  (*files)["g/baydata/part_main-lod0.xmf"] = tetraXmf();
+  const ExtractFn extract = extractFrom(std::move(files));
+
+  TempDir out;
+  const MeshConvertResult conv =
+      convertModuleMeshes(extract, {""}, out.path.string(), /*force=*/false, nullptr);
+  CHECK(conv.converted == 1);
+  CHECK(conv.failed == 0);
+  // Output is keyed by the LOCAL instance name but sourced from the xref geometry.
+  CHECK(fs::exists(out.path / meshGltfPath("pier_macro", "part_main01")));
+}
+
 TEST_CASE("convertModuleMeshes counts a missing source mesh as failed") {
   auto files = std::make_shared<FileMap>();
   (*files)["libraries/wares.xml"] = R"(<wares>

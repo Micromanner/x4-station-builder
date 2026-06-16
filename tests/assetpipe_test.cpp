@@ -212,6 +212,43 @@ TEST_CASE("isVisualPart drops effects and non-visual helper geometry") {
   CHECK_FALSE(isVisualPart("detail_l_radiator_collisionbox"));
 }
 
+TEST_CASE("parsePartRef splits a cross-reference into component and part") {
+  const auto r = parsePartRef("xref_dockingbay_gen_xl_pier_01.part_main");
+  REQUIRE(r.has_value());
+  CHECK(r->component == "xref_dockingbay_gen_xl_pier_01");
+  CHECK(r->part == "part_main");
+}
+
+TEST_CASE("parsePartRef rejects an empty or separator-less ref") {
+  CHECK_FALSE(parsePartRef("").has_value());
+  CHECK_FALSE(parsePartRef("noseparator").has_value());
+  CHECK_FALSE(parsePartRef(".part").has_value());      // empty component
+  CHECK_FALSE(parsePartRef("component.").has_value());  // empty part
+}
+
+TEST_CASE("parseComponentGeometry captures a part's xref and keeps the local name") {
+  // A pier-style module: one normal hull part plus an instanced sub-assembly whose
+  // geometry lives in another component (ref), mounted under a local name.
+  const char* xml = R"(<?xml version="1.0"?>
+<components>
+  <component name="pier_01" class="dockarea">
+    <source geometry="g/pier_data"/>
+    <connections>
+      <connection name="C1" tags="part"><parts><part name="part_main"/></parts></connection>
+      <connection name="C2" tags="part"><parts>
+        <part ref="xref_bay.part_main" name="part_main01"/>
+      </parts></connection>
+    </connections>
+  </component>
+</components>)";
+  const ComponentGeometry geo = parseComponentGeometry(xml);
+  REQUIRE(geo.parts.size() == 2);
+  CHECK(geo.parts[0].name == "part_main");
+  CHECK(geo.parts[0].ref.empty());
+  CHECK(geo.parts[1].name == "part_main01");
+  CHECK(geo.parts[1].ref == "xref_bay.part_main");
+}
+
 TEST_CASE("partXmfPathLod builds the LOD-suffixed source path; partXmfPath stays lod0") {
   CHECK(partXmfPathLod("g/f", "part_main", 0) == "g/f/part_main-lod0.xmf");
   CHECK(partXmfPathLod("g/f", "part_main", 2) == "g/f/part_main-lod2.xmf");
