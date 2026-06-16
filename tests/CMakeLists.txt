@@ -5,6 +5,8 @@ add_executable(x4sb_tests
   document_test.cpp
   snap_test.cpp
   pick_test.cpp
+  display_flip_test.cpp
+  editorcore_test.cpp
   archive_test.cpp
   assetpipe_test.cpp
   xmf_test.cpp
@@ -23,6 +25,7 @@ target_link_libraries(x4sb_tests PRIVATE
   x4sb_data
   x4sb_document
   x4sb_snap
+  x4sb_editorcore
   x4sb_autolayout
   x4sb_planio
   x4sb_coords
