@@ -13,6 +13,7 @@
 #include <cstdio>
 #include <optional>
 #include <string>
+#include <unordered_map>
 #include <utility>
 #include <vector>
 
@@ -246,6 +247,32 @@ struct ViewCull {
 // full detail.
 constexpr float kMeshPx = 12.0f;
 
+// Bucket one module's drawable parts for instanced submission, mirroring
+// drawModuleMeshes' boxing rules exactly: an oversized STRUCTURAL part can't render,
+// so the whole module must fall back to a box (returns false, nothing bucketed);
+// oversized greebles are skipped so the hull still draws. On success each present
+// part's model matrix is appended to its per-path bucket. Keyed by gltfPath
+// (`<defId>__<part>`), so every placed copy of a module shares a bucket — the
+// repetition an X4 station is built from, collapsed into one draw call per part.
+[[nodiscard]] bool collectModuleInstances(
+    const ModuleDef& def, const Transform& xf, MeshCache& meshes,
+    std::unordered_map<std::string, std::vector<::Matrix>>& buckets) {
+  bool anyPresent = false;
+  for (const MeshRef& ref : def.meshRefs) {
+    if (meshes.get(ref.gltfPath) != nullptr)
+      anyPresent = true;
+    else if (meshes.isOversized(ref.gltfPath) && meshRefIsStructural(ref.gltfPath))
+      return false;
+  }
+  if (!anyPresent) return false;
+
+  for (const MeshRef& ref : def.meshRefs) {
+    if (meshes.get(ref.gltfPath) == nullptr) continue;
+    buckets[ref.gltfPath].push_back(toRlMatrix(compose(xf, ref.localTransform)));
+  }
+  return true;
+}
+
 // Draw every placed module at a cost matched to its on-screen size, in two passes
 // so each gets the culling state it needs: solid meshes (backface-culled) first,
 // then the opaque LOD/fallback boxes (unculled), then connectors+gizmo for the
@@ -263,16 +290,13 @@ void drawPlacedModules(const Station& station, const ModuleCatalog& catalog,
   std::vector<std::pair<const ModuleDef*, const PlacedModule*>> boxes;
   boxes.reserve(station.modules().size());
 
-  // Pass 1a: cull + LOD select. Pure CPU (no draw calls) so its Tracy zone isolates
-  // the per-module cull/LOD math from the mesh-submission cost measured in pass 1b —
-  // resolving whether the big-station bottleneck is the math loop or the draw calls.
-  struct DetailDraw {
-    const ModuleDef* def;
-    const PlacedModule* pm;
-    ::Color tint;
-  };
-  std::vector<DetailDraw> detail;
-  detail.reserve(station.modules().size());
+  // Pass 1a: cull + LOD select, bucketing detailed parts by mesh for instancing.
+  // Pure CPU (no draw calls) so its Tracy zone isolates the per-module cull/LOD math
+  // from the mesh-submission cost in pass 1b. The selected module is held out (it
+  // wants a yellow tint and there is only one) and drawn the per-module way.
+  std::unordered_map<std::string, std::vector<::Matrix>> instances;
+  const ModuleDef* selDef = nullptr;
+  const PlacedModule* selPm = nullptr;
   {
     ZoneScopedN("modules: cull+lod");
     for (const auto& pm : station.modules()) {
@@ -283,23 +307,28 @@ void drawPlacedModules(const Station& station, const ModuleCatalog& catalog,
       if (!sel && frustumCull(lod, vc)) continue;
 
       const bool detailed = sel || lod.pixelSize >= static_cast<double>(kMeshPx);
-      if (detailed && showMeshes)
-        detail.push_back({def, &pm, sel ? YELLOW : LIGHTGRAY});
-      else
+      if (!(detailed && showMeshes)) {
         boxes.emplace_back(def, &pm);
+      } else if (sel) {
+        selDef = def;
+        selPm = &pm;
+      } else if (!collectModuleInstances(*def, pm.worldTransform, meshes, instances)) {
+        boxes.emplace_back(def, &pm);  // oversized hull / no geometry -> box
+      }
     }
   }
 
-  // Pass 1b: solid-mesh submission for the detailed set. Backface culling on —
-  // correct + cheaper under the flip. A mesh that fails to draw (no cached geometry)
-  // falls back to a box.
+  // Pass 1b: instanced mesh submission — one DrawMeshInstanced per unique part across
+  // all its placed copies. Backface culling on (correct + cheaper under the flip).
+  // The selected module draws separately for its tint; a structural-oversized one
+  // still boxes.
   {
     ZoneScopedN("modules: mesh");
     rlEnableBackfaceCulling();
-    for (const auto& d : detail) {
-      if (!drawModuleMeshes(*d.def, d.pm->worldTransform, meshes, d.tint))
-        boxes.emplace_back(d.def, d.pm);
-    }
+    for (const auto& [path, xforms] : instances) meshes.drawInstanced(path, xforms, LIGHTGRAY);
+    if (selDef != nullptr && selPm != nullptr &&
+        !drawModuleMeshes(*selDef, selPm->worldTransform, meshes, YELLOW))
+      boxes.emplace_back(selDef, selPm);
     rlDisableBackfaceCulling();
   }
 

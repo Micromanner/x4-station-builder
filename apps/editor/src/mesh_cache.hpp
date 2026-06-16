@@ -11,6 +11,7 @@
 #include <string>
 #include <unordered_map>
 #include <unordered_set>
+#include <vector>
 
 namespace x4sb::editor {
 
@@ -38,6 +39,15 @@ class MeshCache {
     return oversized_.count(gltfPath) != 0;
   }
 
+  // Draw every instance of one cached part in a SINGLE GPU call (DrawMeshInstanced),
+  // flat-shaded with `tint` — the big-station win, collapsing one draw call per
+  // placed copy into one per unique part. `xforms` are model matrices in native X4
+  // space; the global scene flip is carried by the instancing shader's mvp uniform,
+  // exactly as the per-module path relies on the rlScalef stack. No-op when the part
+  // is missing or the instancing shader failed to compile (caller boxes instead).
+  void drawInstanced(const std::string& gltfPath, const std::vector<::Matrix>& xforms,
+                     ::Color tint);
+
  private:
   std::filesystem::path root_;
   std::unordered_map<std::string, std::optional<::Model>> cache_;  // nullopt = known-missing
@@ -46,6 +56,11 @@ class MeshCache {
   // by every loaded model's material so solid modules read as 3D, not flat blobs.
   ::Shader flatShader_{};
   bool flatShaderOk_{false};
+  // Instancing variant of the flat shader: identical lighting, but reads the model
+  // matrix from a per-instance `instanceTransform` vertex attribute instead of a
+  // uniform, so DrawMeshInstanced can batch every copy of a part into one call.
+  ::Shader instancedShader_{};
+  bool instancedShaderOk_{false};
 };
 
 }  // namespace x4sb::editor
