@@ -263,12 +263,18 @@ void drawPlacedModules(const Station& station, const ModuleCatalog& catalog,
   std::vector<std::pair<const ModuleDef*, const PlacedModule*>> boxes;
   boxes.reserve(station.modules().size());
 
-  // Pass 1: cull + LOD select + solid-mesh submission. Backface culling on —
-  // correct + cheaper under the flip. This zone vs. pass 2/3 reveals whether CPU
-  // cost is the per-module cull/LOD math or the actual mesh draw calls.
+  // Pass 1a: cull + LOD select. Pure CPU (no draw calls) so its Tracy zone isolates
+  // the per-module cull/LOD math from the mesh-submission cost measured in pass 1b —
+  // resolving whether the big-station bottleneck is the math loop or the draw calls.
+  struct DetailDraw {
+    const ModuleDef* def;
+    const PlacedModule* pm;
+    ::Color tint;
+  };
+  std::vector<DetailDraw> detail;
+  detail.reserve(station.modules().size());
   {
-    ZoneScopedN("modules: cull+lod+mesh");
-    rlEnableBackfaceCulling();
+    ZoneScopedN("modules: cull+lod");
     for (const auto& pm : station.modules()) {
       const ModuleDef* def = catalog.find(pm.defId);
       if (def == nullptr) continue;
@@ -277,9 +283,22 @@ void drawPlacedModules(const Station& station, const ModuleCatalog& catalog,
       if (!sel && frustumCull(lod, vc)) continue;
 
       const bool detailed = sel || lod.pixelSize >= static_cast<double>(kMeshPx);
-      const ::Color tint = sel ? YELLOW : LIGHTGRAY;
-      if (!(detailed && showMeshes && drawModuleMeshes(*def, pm.worldTransform, meshes, tint)))
+      if (detailed && showMeshes)
+        detail.push_back({def, &pm, sel ? YELLOW : LIGHTGRAY});
+      else
         boxes.emplace_back(def, &pm);
+    }
+  }
+
+  // Pass 1b: solid-mesh submission for the detailed set. Backface culling on —
+  // correct + cheaper under the flip. A mesh that fails to draw (no cached geometry)
+  // falls back to a box.
+  {
+    ZoneScopedN("modules: mesh");
+    rlEnableBackfaceCulling();
+    for (const auto& d : detail) {
+      if (!drawModuleMeshes(*d.def, d.pm->worldTransform, meshes, d.tint))
+        boxes.emplace_back(d.def, d.pm);
     }
     rlDisableBackfaceCulling();
   }
