@@ -1,8 +1,36 @@
 #include "x4sb/document/commands.hpp"
 
 #include <utility>
+#include <vector>
 
 namespace x4sb {
+namespace {
+
+// Strip every link pointing back at `id` from each neighbor referenced by
+// `ownLinks`, returning the removed (neighborId, Link) pairs so undo can restore
+// them. Self-links are skipped — the owning module's own links are dropped by the
+// caller, so recording them here would double-count. Preserves Link reciprocity.
+std::vector<std::pair<InstanceId, Link>> stripNeighborLinks(Station& s, InstanceId id,
+                                                            const std::vector<Link>& ownLinks) {
+  std::vector<std::pair<InstanceId, Link>> stripped;
+  for (const Link& l : ownLinks) {
+    if (l.otherInstanceId == id) continue;
+    PlacedModule* nb = s.find(l.otherInstanceId);
+    if (!nb) continue;
+    auto& links = nb->links;
+    for (auto it = links.begin(); it != links.end();) {
+      if (it->otherInstanceId == id) {
+        stripped.emplace_back(nb->instanceId, *it);
+        it = links.erase(it);
+      } else {
+        ++it;
+      }
+    }
+  }
+  return stripped;
+}
+
+}  // namespace
 
 PlaceModuleCommand::PlaceModuleCommand(std::string defId, Transform worldTransform)
     : defId_(std::move(defId)), worldTransform_(worldTransform) {}
@@ -56,21 +84,7 @@ void DeleteModuleCommand::apply(Station& s) {
   removed_ = *m;  // includes its own outgoing links
   captured_ = true;
 
-  strippedNeighborLinks_.clear();
-  for (const Link& l : removed_.links) {
-    if (l.otherInstanceId == id_) continue;  // self-link: removed with the module; never double-record
-    PlacedModule* nb = s.find(l.otherInstanceId);
-    if (!nb) continue;
-    auto& links = nb->links;
-    for (auto it = links.begin(); it != links.end();) {
-      if (it->otherInstanceId == id_) {
-        strippedNeighborLinks_.emplace_back(nb->instanceId, *it);
-        it = links.erase(it);
-      } else {
-        ++it;
-      }
-    }
-  }
+  strippedNeighborLinks_ = stripNeighborLinks(s, id_, removed_.links);
   s.remove(id_);
 }
 
@@ -92,23 +106,9 @@ void MoveModuleCommand::apply(Station& s) {
   removedOwnLinks_ = m->links;
   captured_ = true;
 
-  strippedNeighborLinks_.clear();
-  for (const Link& l : removedOwnLinks_) {
-    if (l.otherInstanceId == id_) continue;  // self-link: handled by clear(); never double-record
-    PlacedModule* nb = s.find(l.otherInstanceId);
-    if (!nb) continue;
-    auto& links = nb->links;
-    for (auto it = links.begin(); it != links.end();) {
-      if (it->otherInstanceId == id_) {
-        strippedNeighborLinks_.emplace_back(nb->instanceId, *it);
-        it = links.erase(it);
-      } else {
-        ++it;
-      }
-    }
-  }
-
-  m = s.find(id_);  // re-find defensively; the strip loop never reallocates placed_, so m stays valid
+  // stripNeighborLinks only mutates neighbors' link vectors, never Station::placed_,
+  // so `m` stays valid across the call.
+  strippedNeighborLinks_ = stripNeighborLinks(s, id_, removedOwnLinks_);
   m->links.clear();
   m->worldTransform = newTransform_;
 }
