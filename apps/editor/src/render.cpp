@@ -1,6 +1,7 @@
 #include "render.hpp"
 
 #include "mesh_cache.hpp"
+#include "profiling.hpp"
 #include "raylib_convert.hpp"
 #include "rlgl.h"
 
@@ -257,41 +258,55 @@ void drawPlacedModules(const Station& station, const ModuleCatalog& catalog,
   const double projF = projFactor(camera);
   const ViewCull vc = viewCull(camera);
 
-  // Pass 1: solid meshes. Backface culling on — correct + cheaper under the flip.
-  rlEnableBackfaceCulling();
+  // Declared before pass 1 (which fills it) so pass 2 can read it from its own
+  // profiler zone scope. Most modules collapse to a box; size up front.
   std::vector<std::pair<const ModuleDef*, const PlacedModule*>> boxes;
-  boxes.reserve(station.modules().size());  // most modules collapse to a box; size up front
-  for (const auto& pm : station.modules()) {
-    const ModuleDef* def = catalog.find(pm.defId);
-    if (def == nullptr) continue;
-    const bool sel = selected.has_value() && *selected == pm.instanceId;
-    const LodMetrics lod = lodMetrics(*def, pm, camera, projF);
-    if (!sel && frustumCull(lod, vc)) continue;
+  boxes.reserve(station.modules().size());
 
-    const bool detailed = sel || lod.pixelSize >= static_cast<double>(kMeshPx);
-    const ::Color tint = sel ? YELLOW : LIGHTGRAY;
-    if (!(detailed && showMeshes && drawModuleMeshes(*def, pm.worldTransform, meshes, tint)))
-      boxes.emplace_back(def, &pm);
+  // Pass 1: cull + LOD select + solid-mesh submission. Backface culling on —
+  // correct + cheaper under the flip. This zone vs. pass 2/3 reveals whether CPU
+  // cost is the per-module cull/LOD math or the actual mesh draw calls.
+  {
+    ZoneScopedN("modules: cull+lod+mesh");
+    rlEnableBackfaceCulling();
+    for (const auto& pm : station.modules()) {
+      const ModuleDef* def = catalog.find(pm.defId);
+      if (def == nullptr) continue;
+      const bool sel = selected.has_value() && *selected == pm.instanceId;
+      const LodMetrics lod = lodMetrics(*def, pm, camera, projF);
+      if (!sel && frustumCull(lod, vc)) continue;
+
+      const bool detailed = sel || lod.pixelSize >= static_cast<double>(kMeshPx);
+      const ::Color tint = sel ? YELLOW : LIGHTGRAY;
+      if (!(detailed && showMeshes && drawModuleMeshes(*def, pm.worldTransform, meshes, tint)))
+        boxes.emplace_back(def, &pm);
+    }
+    rlDisableBackfaceCulling();
   }
-  rlDisableBackfaceCulling();
 
   // Pass 2: opaque boxes (batched, unculled) for distant + mesh-less modules.
-  for (const auto& [def, pm] : boxes) {
-    const bool sel = selected.has_value() && *selected == pm->instanceId;
-    drawModuleBox(*def, pm->worldTransform, sel ? ::Color{180, 160, 40, 255} : kBoxFill,
-                  sel ? YELLOW : kBoxEdge);
+  {
+    ZoneScopedN("modules: boxes");
+    for (const auto& [def, pm] : boxes) {
+      const bool sel = selected.has_value() && *selected == pm->instanceId;
+      drawModuleBox(*def, pm->worldTransform, sel ? ::Color{180, 160, 40, 255} : kBoxFill,
+                    sel ? YELLOW : kBoxEdge);
+    }
   }
 
   // Pass 3: detail markers. Interactive editor shows them for the SELECTED module
   // only (the forest of every-module connectors was the bulk of big-station
   // clutter + cost); the snap-eyeball harness opts into all of them.
-  for (const auto& pm : station.modules()) {
-    const bool sel = selected.has_value() && *selected == pm.instanceId;
-    if (!allConnectors && !sel) continue;
-    const ModuleDef* def = catalog.find(pm.defId);
-    if (def == nullptr) continue;
-    drawConnectors(*def, pm);
-    if (showGizmos) drawAxisGizmo(*def, pm.worldTransform);
+  {
+    ZoneScopedN("modules: markers");
+    for (const auto& pm : station.modules()) {
+      const bool sel = selected.has_value() && *selected == pm.instanceId;
+      if (!allConnectors && !sel) continue;
+      const ModuleDef* def = catalog.find(pm.defId);
+      if (def == nullptr) continue;
+      drawConnectors(*def, pm);
+      if (showGizmos) drawAxisGizmo(*def, pm.worldTransform);
+    }
   }
 }
 
@@ -334,6 +349,7 @@ StationBounds stationBounds(const Station& station, const ModuleCatalog& catalog
 
 void drawScene(const EditorState& state, const ::Camera3D& camera, MeshCache& meshes,
                bool showGizmos, bool showMeshes) {
+  ZoneScoped;
   beginScene(camera);
 
   drawPlacedModules(state.station(), state.catalog(), state.selected(), meshes, showGizmos,
@@ -359,6 +375,7 @@ void drawScene(const EditorState& state, const ::Camera3D& camera, MeshCache& me
 
 void drawScene(const Station& station, const ModuleCatalog& catalog, const ::Camera3D& camera,
                MeshCache& meshes, bool showGizmos, bool showMeshes, bool allConnectors) {
+  ZoneScoped;
   beginScene(camera);
   drawPlacedModules(station, catalog, std::nullopt, meshes, showGizmos, showMeshes, camera,
                     allConnectors);

@@ -61,6 +61,14 @@ Desktop.ini
 $RECYCLE.BIN/
 .DS_Store
 
+# Fetched profiler binaries (see tools/*/README.md) + generated captures
+tools/tracy/*
+!tools/tracy/README.md
+tools/renderdoc/*
+!tools/renderdoc/README.md
+*.tracy
+profiling/
+
 # Claude
 CLAUDE.md
 docs/

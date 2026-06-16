@@ -8,6 +8,9 @@
 #include "orbit_camera.hpp"
 #include "megashot.hpp"
 #include "plan_io.hpp"
+#include "profile.hpp"
+#include "profiling.hpp"
+#include "rdc_capture.hpp"
 #include "render.hpp"
 #include "snaptest.hpp"
 
@@ -18,6 +21,7 @@
 #include "raylib.h"
 
 #include <cstdio>
+#include <cstdlib>
 #include <filesystem>
 #include <optional>
 #include <string>
@@ -69,6 +73,12 @@ int main(int argc, char** argv) {
     if (std::string(argv[i]) == "--megashot" && i + 2 < argc) {
       return x4sb::editor::runMegaShot(std::string(argv[i + 1]), std::string(argv[i + 2]));
     }
+    if (std::string(argv[i]) == "--profile" && i + 2 < argc) {
+      return x4sb::editor::runProfile(std::string(argv[i + 1]), std::atoi(argv[i + 2]));
+    }
+    if (std::string(argv[i]) == "--rdc" && i + 1 < argc) {
+      return x4sb::editor::runRdcCapture(std::string(argv[i + 1]));
+    }
   }
 
   InitWindow(kScreenW, kScreenH, "X4 Station Builder");
@@ -95,32 +105,35 @@ int main(int argc, char** argv) {
     double toastUntil = 0.0;
 
     while (!WindowShouldClose()) {
-      cam.update();
-      x4sb::editor::handleKeys(state);
-      if (IsKeyPressed(KEY_G)) showGizmos = !showGizmos;
-      if (IsKeyPressed(KEY_M)) showMeshes = !showMeshes;
-      if (IsKeyPressed(KEY_F)) {
-        ::Vector3 c{};
-        float r = 20.0f;
-        stationBounds(state, c, r);
-        cam.frame(c, r);
-      }
-      if (std::optional<std::string> msg = x4sb::editor::handlePlanIoKeys(state)) {
-        toast = *msg;
-        toastUntil = GetTime() + 4.0;
-      }
+      {
+        ZoneScopedN("input+update");
+        cam.update();
+        x4sb::editor::handleKeys(state);
+        if (IsKeyPressed(KEY_G)) showGizmos = !showGizmos;
+        if (IsKeyPressed(KEY_M)) showMeshes = !showMeshes;
+        if (IsKeyPressed(KEY_F)) {
+          ::Vector3 c{};
+          float r = 20.0f;
+          stationBounds(state, c, r);
+          cam.frame(c, r);
+        }
+        if (std::optional<std::string> msg = x4sb::editor::handlePlanIoKeys(state)) {
+          toast = *msg;
+          toastUntil = GetTime() + 4.0;
+        }
 
-      // Mouse ray in X4 space drives the ghost preview every frame.
-      x4sb::Vec3 ro{};
-      x4sb::Vec3 rd{};
-      x4sb::editor::mouseRayX4(cam.camera(), ro, rd);
-      state.updateGhost(ro, rd);
+        // Mouse ray in X4 space drives the ghost preview every frame.
+        x4sb::Vec3 ro{};
+        x4sb::Vec3 rd{};
+        x4sb::editor::mouseRayX4(cam.camera(), ro, rd);
+        state.updateGhost(ro, rd);
 
-      if (IsMouseButtonPressed(MOUSE_BUTTON_LEFT)) {
-        // Commit a valid ghost; otherwise treat the click as a selection.
-        const bool placed = state.ghost().has_value() && state.ghost()->valid &&
-                            state.commitGhost().has_value();
-        if (!placed) state.selectByRay(ro, rd);
+        if (IsMouseButtonPressed(MOUSE_BUTTON_LEFT)) {
+          // Commit a valid ghost; otherwise treat the click as a selection.
+          const bool placed = state.ghost().has_value() && state.ghost()->valid &&
+                              state.commitGhost().has_value();
+          if (!placed) state.selectByRay(ro, rd);
+        }
       }
 
       BeginDrawing();
@@ -129,6 +142,7 @@ int main(int argc, char** argv) {
       x4sb::editor::drawHud(state, kScreenW, kScreenH, showGizmos);
       if (GetTime() < toastUntil) x4sb::editor::drawToast(toast, kScreenH);
       EndDrawing();
+      FrameMark;
     }
   }  // meshes destroyed here (UnloadModel) before CloseWindow
 

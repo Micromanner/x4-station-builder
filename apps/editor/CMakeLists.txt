@@ -9,6 +9,9 @@ add_executable(x4sb-editor
   src/mesh_cache.cpp
   src/snaptest.cpp
   src/megashot.cpp
+  src/profile.cpp
+  src/rdc_api.cpp
+  src/rdc_capture.cpp
   src/plan_io.cpp
   src/raygui_impl.c)
 
@@ -24,7 +27,14 @@ target_link_libraries(x4sb-editor PRIVATE
   x4sb_planio
   x4sb_coords
   x4sb_platform
-  raylib)
+  raylib
+  renderdoc::app)
+
+# Tracy profiler client (full-tracy preset only). Linking it defines TRACY_ENABLE
+# PUBLIC, switching src/profiling.hpp onto the real zone macros.
+if(X4SB_TRACY)
+  target_link_libraries(x4sb-editor PRIVATE tracy::client)
+endif()
 
 # On Windows, building the GUI subsystem avoids a console window in Release.
 if(WIN32 AND CMAKE_BUILD_TYPE STREQUAL "Release")

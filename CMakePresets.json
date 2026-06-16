@@ -35,12 +35,23 @@
       "cacheVariables": {
         "X4SB_CLANG_TIDY": "ON"
       }
+    },
+    {
+      "name": "full-tracy",
+      "inherits": "full",
+      "displayName": "Full + Tracy profiler",
+      "description": "Editor built with the vendored Tracy profiler client (X4SB_TRACY=ON). Separate build dir so the normal full build stays profiler-free.",
+      "binaryDir": "${sourceDir}/build/full-tracy",
+      "cacheVariables": {
+        "X4SB_TRACY": "ON"
+      }
     }
   ],
   "buildPresets": [
     { "name": "core", "configurePreset": "core" },
     { "name": "core-tidy", "configurePreset": "core-tidy" },
-    { "name": "full", "configurePreset": "full" }
+    { "name": "full", "configurePreset": "full" },
+    { "name": "full-tracy", "configurePreset": "full-tracy" }
   ],
   "testPresets": [
     {

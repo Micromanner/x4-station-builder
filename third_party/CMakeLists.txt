@@ -34,3 +34,30 @@ set(RAYGUI_INCLUDE_DIR "${CMAKE_CURRENT_SOURCE_DIR}/raygui"
 add_library(sinfl STATIC ${CMAKE_CURRENT_SOURCE_DIR}/sinfl/sinfl_impl.c)
 add_library(sinfl::sinfl ALIAS sinfl)
 target_include_directories(sinfl SYSTEM PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/sinfl)
+
+# RenderDoc in-app API — a single vendored header, NO library (renderdoc.dll is
+# injected at runtime by `renderdoccmd`). Header-only INTERFACE target so the editor
+# can trigger programmatic frame captures; it is a no-op unless launched under
+# RenderDoc, so it always compiles in and needs no build flag. SYSTEM keeps it out
+# of the first-party -Werror gate.
+add_library(renderdoc_app INTERFACE)
+add_library(renderdoc::app ALIAS renderdoc_app)
+target_include_directories(renderdoc_app SYSTEM INTERFACE ${CMAKE_CURRENT_SOURCE_DIR}/renderdoc)
+
+# Tracy v0.13.1 — frame profiler client (vendored public/ tree). Built ONLY when
+# X4SB_TRACY=ON (the full-tracy preset); the default build never compiles it, so
+# it adds zero cost there. TRACY_ENABLE is PUBLIC so linking it both activates the
+# client TU and switches the editor's profiling.hpp onto the real macros; the
+# include dir is PUBLIC+SYSTEM so call sites can include <tracy/Tracy.hpp> without
+# tripping the first-party -Werror gate. Render-free libs never link this.
+if(X4SB_TRACY)
+  add_library(tracy STATIC ${CMAKE_CURRENT_SOURCE_DIR}/tracy/public/TracyClient.cpp)
+  add_library(tracy::client ALIAS tracy)
+  target_compile_definitions(tracy PUBLIC TRACY_ENABLE)
+  target_include_directories(tracy SYSTEM PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/tracy/public)
+  # Windows: Tracy's profiling socket needs ws2_32; symbol/callstack resolution
+  # needs dbghelp.
+  if(WIN32)
+    target_link_libraries(tracy PUBLIC ws2_32 dbghelp)
+  endif()
+endif()

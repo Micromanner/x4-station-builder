@@ -38,6 +38,10 @@ endif()
 # only the render-free libs, the pipeline CLI, and the tests.
 option(X4SB_BUILD_EDITOR "Build the raylib/raygui editor app" ON)
 option(X4SB_BUILD_TESTS  "Build unit tests (doctest)"          ON)
+# Tracy frame profiler: compiles + links the vendored client into the editor and
+# defines TRACY_ENABLE. OFF by default so normal builds carry zero profiling cost
+# (the instrumentation macros no-op); the `full-tracy` preset turns it ON.
+option(X4SB_TRACY        "Build the editor with the Tracy profiler client" OFF)
 
 # ── Dependencies ────────────────────────────────────────────────────────────
 # Vendored, frozen deps (doctest, nlohmann/json, pugixml, raygui) — compiled by
