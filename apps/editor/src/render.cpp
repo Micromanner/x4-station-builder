@@ -64,18 +64,14 @@ void drawModuleBox(const ModuleDef& def, const Transform& xf, ::Color fill, ::Co
   rlPopMatrix();
 }
 
-// Draw `def`'s glTF parts as SOLID flat-shaded meshes under `xf`, each part nested
-// in its own localTransform. Returns true if at least one mesh drew; false (no mesh
-// loaded) signals the caller to fall back to the AABB box. The caller must have
-// backface culling ENABLED: under the global (1,1,-1) flip the winding is exactly
-// what default back-face culling expects (confirmed empirically), so this both
-// renders correctly and is cheaper than drawing every triangle's back side.
-bool drawModuleMeshes(const ModuleDef& def, const Transform& xf, MeshCache& meshes, ::Color tint) {
-  // Resolve all parts first (get() caches). An oversized part (>u16 indices) would
-  // render as wrapped-index garbage, so it can't draw: box the whole module only
-  // when the oversized part is the structural hull (a hull-less module reads as
-  // broken); skip an oversized detail/anim greeble and let the hull still draw.
-  // Most oversized parts are lod0-only detail greebles the LOD pass can't shrink.
+// Decide whether `def` can render as solid meshes (else the caller boxes it). True
+// only when at least one part is loaded AND no oversized part (>u16 indices, which
+// would render as wrapped-index garbage) is the structural hull — a hull-less module
+// reads as broken, so it boxes; an oversized detail/anim greeble is merely skipped so
+// the hull still draws (most oversized parts are lod0-only greebles the LOD pass can't
+// shrink). Shared by the per-module and instanced paths so their boxing policy can't
+// drift apart.
+[[nodiscard]] bool canRenderAsMeshes(const ModuleDef& def, MeshCache& meshes) {
   bool anyPresent = false;
   for (const MeshRef& ref : def.meshRefs) {
     if (meshes.get(ref.gltfPath) != nullptr)
@@ -83,8 +79,18 @@ bool drawModuleMeshes(const ModuleDef& def, const Transform& xf, MeshCache& mesh
     else if (meshes.isOversized(ref.gltfPath) && meshRefIsStructural(ref.gltfPath))
       return false;
   }
-  if (!anyPresent) return false;
+  return anyPresent;
+}
 
+// Draw `def`'s glTF parts as SOLID flat-shaded meshes under `xf`, each part nested
+// in its own localTransform. Returns true if at least one mesh drew; false (boxing
+// rule failed, see canRenderAsMeshes) signals the caller to fall back to the AABB
+// box. The caller must have backface culling ENABLED: under the global (1,1,-1) flip
+// the winding is exactly what default back-face culling expects (confirmed
+// empirically), so this both renders correctly and is cheaper than drawing every
+// triangle's back side.
+bool drawModuleMeshes(const ModuleDef& def, const Transform& xf, MeshCache& meshes, ::Color tint) {
+  if (!canRenderAsMeshes(def, meshes)) return false;
   for (const MeshRef& ref : def.meshRefs) {
     const ::Model* model = meshes.get(ref.gltfPath);
     if (model == nullptr) continue;
@@ -247,25 +253,16 @@ struct ViewCull {
 // full detail.
 constexpr float kMeshPx = 12.0f;
 
-// Bucket one module's drawable parts for instanced submission, mirroring
-// drawModuleMeshes' boxing rules exactly: an oversized STRUCTURAL part can't render,
-// so the whole module must fall back to a box (returns false, nothing bucketed);
-// oversized greebles are skipped so the hull still draws. On success each present
-// part's model matrix is appended to its per-path bucket. Keyed by gltfPath
-// (`<defId>__<part>`), so every placed copy of a module shares a bucket — the
-// repetition an X4 station is built from, collapsed into one draw call per part.
+// Bucket one module's drawable parts for instanced submission. Shares the boxing
+// decision with the per-module path via canRenderAsMeshes (false -> nothing bucketed,
+// caller boxes). On success each present part's model matrix is appended to its
+// per-path bucket, keyed by gltfPath (`<defId>__<part>`), so every placed copy of a
+// module shares a bucket — the repetition an X4 station is built from, collapsed into
+// one draw call per part.
 [[nodiscard]] bool collectModuleInstances(
     const ModuleDef& def, const Transform& xf, MeshCache& meshes,
     std::unordered_map<std::string, std::vector<::Matrix>>& buckets) {
-  bool anyPresent = false;
-  for (const MeshRef& ref : def.meshRefs) {
-    if (meshes.get(ref.gltfPath) != nullptr)
-      anyPresent = true;
-    else if (meshes.isOversized(ref.gltfPath) && meshRefIsStructural(ref.gltfPath))
-      return false;
-  }
-  if (!anyPresent) return false;
-
+  if (!canRenderAsMeshes(def, meshes)) return false;
   for (const MeshRef& ref : def.meshRefs) {
     if (meshes.get(ref.gltfPath) == nullptr) continue;
     buckets[ref.gltfPath].push_back(toRlMatrix(compose(xf, ref.localTransform)));
