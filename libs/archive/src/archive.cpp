@@ -4,6 +4,7 @@
 #include <cctype>
 #include <filesystem>
 #include <fstream>
+#include <sstream>
 #include <utility>
 
 namespace x4sb {
@@ -87,7 +88,12 @@ bool Archive::addCatalog(const std::string& catPath, const std::string& logicalP
 
   std::ifstream in(catPath, std::ios::binary);
   if (!in) return false;
-  const std::string text((std::istreambuf_iterator<char>(in)), std::istreambuf_iterator<char>());
+  // Read the whole catalog via rdbuf() rather than an istreambuf_iterator pair:
+  // GCC 13 under -O3 mis-fires -Werror=null-dereference on the iterator idiom
+  // (a known false positive); streaming the buffer reads identically and clean.
+  std::ostringstream contents;
+  contents << in.rdbuf();
+  const std::string text = contents.str();
 
   const std::string datPath = swapExtension(catPath, ".dat");
   const CatIndex idx = CatIndex::parse(text);
