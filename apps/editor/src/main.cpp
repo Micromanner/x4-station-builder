@@ -6,6 +6,7 @@
 #include "input.hpp"
 #include "mesh_cache.hpp"
 #include "orbit_camera.hpp"
+#include "plan_io.hpp"
 #include "render.hpp"
 #include "snaptest.hpp"
 
@@ -91,6 +92,8 @@ int main(int argc, char** argv) {
     x4sb::editor::OrbitCamera cam;
     bool showGizmos = true;
     bool showMeshes = true;  // render-only state; not in EditorState (that's render-free)
+    std::string toast;
+    double toastUntil = 0.0;
 
     while (!WindowShouldClose()) {
       cam.update();
@@ -102,6 +105,10 @@ int main(int argc, char** argv) {
         float r = 20.0f;
         stationBounds(state, c, r);
         cam.frame(c, r);
+      }
+      if (std::optional<std::string> msg = x4sb::editor::handlePlanIoKeys(state)) {
+        toast = *msg;
+        toastUntil = GetTime() + 4.0;
       }
 
       // Mouse ray in X4 space drives the ghost preview every frame.
@@ -121,6 +128,7 @@ int main(int argc, char** argv) {
       ClearBackground(::Color{30, 30, 38, 255});
       x4sb::editor::drawScene(state, cam.camera(), meshes, showGizmos, showMeshes);
       x4sb::editor::drawHud(state, kScreenW, kScreenH, showGizmos);
+      if (GetTime() < toastUntil) x4sb::editor::drawToast(toast, kScreenH);
       EndDrawing();
     }
   }  // meshes destroyed here (UnloadModel) before CloseWindow

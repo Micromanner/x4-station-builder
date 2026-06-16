@@ -52,6 +52,9 @@ class EditorState {
   void redo() { undo_.redo(station_); }
   [[nodiscard]] bool canUndo() const { return undo_.canUndo(); }
   [[nodiscard]] bool canRedo() const { return undo_.canRedo(); }
+  // Replace the document on plan load: a fresh document, so undo/redo,
+  // selection, and ghost reset.
+  void loadStation(Station station);
 
   // ── Selection / deletion ────────────────────────────────────────────────
   // Pick the nearest module along the X4-space ray; sets (or clears on a miss)

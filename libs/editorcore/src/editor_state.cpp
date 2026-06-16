@@ -113,6 +113,13 @@ std::optional<InstanceId> EditorState::commitGhost() {
   return station_.modules().back().instanceId;
 }
 
+void EditorState::loadStation(Station station) {
+  station_ = std::move(station);
+  undo_ = UndoStack{};  // UndoStack has no clear(); a fresh instance is the reset
+  selected_.reset();
+  ghost_.reset();
+}
+
 std::optional<InstanceId> EditorState::selectByRay(Vec3 rayOriginX4, Vec3 rayDirX4) {
   selected_ = pickModule(station_, catalog_, rayOriginX4, rayDirX4);
   return selected_;

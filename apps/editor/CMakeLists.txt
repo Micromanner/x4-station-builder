@@ -8,6 +8,7 @@ add_executable(x4sb-editor
   src/input.cpp
   src/mesh_cache.cpp
   src/snaptest.cpp
+  src/plan_io.cpp
   src/raygui_impl.c)
 
 # SYSTEM so the first-party -Werror harness ignores warnings from the raygui header.

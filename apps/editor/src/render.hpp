@@ -8,6 +8,8 @@
 
 #include "raylib.h"
 
+#include <string>
+
 namespace x4sb::editor {
 
 // Draw the 3D scene (build box, modules, connector markers, ghost, and per-module
@@ -24,5 +26,8 @@ void drawScene(const Station& station, const ModuleCatalog& catalog, const ::Cam
 
 // Draw the 2D HUD overlay (active module, filter, counts, undo state, controls).
 void drawHud(const EditorState& state, int screenWidth, int screenHeight, bool showGizmos);
+
+// Draw a transient status line (plan save/load result) bottom-left, over the HUD.
+void drawToast(const std::string& message, int screenHeight);
 
 }  // namespace x4sb::editor

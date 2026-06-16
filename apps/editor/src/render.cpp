@@ -204,4 +204,16 @@ void drawHud(const EditorState& state, int screenWidth, int /*screenHeight*/, bo
   DrawFPS(screenWidth - 90, 10);
 }
 
+void drawToast(const std::string& message, int screenHeight) {
+  if (message.empty()) return;
+  const int fontSize = 20;
+  const int pad = 10;
+  const int x = 20;
+  const int bottomMargin = 12;
+  const int y = screenHeight - fontSize - pad - bottomMargin;
+  const int textW = MeasureText(message.c_str(), fontSize);
+  DrawRectangle(x - pad, y - pad, textW + 2 * pad, fontSize + 2 * pad, ::Color{0, 0, 0, 190});
+  DrawText(message.c_str(), x, y, fontSize, ::Color{120, 230, 140, 255});
+}
+
 }  // namespace x4sb::editor

@@ -161,3 +161,29 @@ TEST_CASE("select by ray, delete, and undo restores the module") {
 
   CHECK_FALSE(s.deleteSelected());  // nothing selected now -> no-op
 }
+
+TEST_CASE("loadStation replaces the document and resets history/selection/ghost") {
+  const ModuleCatalog c = twoModuleCatalog();
+  EditorState s(c);
+
+  // Create undo history: root-place a_mod on the empty station.
+  s.updateGhost(Vec3{0, 100, 0}, Vec3{0, -1, 0});  // ray straight down hits ground
+  REQUIRE(s.ghost().has_value());
+  REQUIRE(s.commitGhost().has_value());
+  REQUIRE(s.canUndo());
+
+  Station loaded;
+  PlacedModule m;
+  m.instanceId = 5;
+  m.defId = "b_mod";
+  loaded.add(m);
+
+  s.loadStation(std::move(loaded));
+
+  CHECK(s.station().size() == 1);
+  CHECK(s.station().find(5) != nullptr);
+  CHECK_FALSE(s.canUndo());
+  CHECK_FALSE(s.canRedo());
+  CHECK_FALSE(s.selected().has_value());
+  CHECK_FALSE(s.ghost().has_value());
+}
