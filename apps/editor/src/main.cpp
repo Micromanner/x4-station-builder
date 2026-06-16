@@ -6,6 +6,7 @@
 #include "input.hpp"
 #include "mesh_cache.hpp"
 #include "orbit_camera.hpp"
+#include "megashot.hpp"
 #include "plan_io.hpp"
 #include "render.hpp"
 #include "snaptest.hpp"
@@ -69,6 +70,9 @@ int main(int argc, char** argv) {
   for (int i = 1; i + 1 < argc; ++i) {
     if (std::string(argv[i]) == "--snaptest") {
       return x4sb::editor::runSnapTest(std::string(argv[i + 1]));
+    }
+    if (std::string(argv[i]) == "--megashot" && i + 2 < argc) {
+      return x4sb::editor::runMegaShot(std::string(argv[i + 1]), std::string(argv[i + 2]));
     }
   }
 

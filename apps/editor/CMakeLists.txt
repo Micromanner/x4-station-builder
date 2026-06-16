@@ -8,6 +8,7 @@ add_executable(x4sb-editor
   src/input.cpp
   src/mesh_cache.cpp
   src/snaptest.cpp
+  src/megashot.cpp
   src/plan_io.cpp
   src/raygui_impl.c)
 

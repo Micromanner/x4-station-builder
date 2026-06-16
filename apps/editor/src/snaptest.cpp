@@ -85,7 +85,10 @@ void renderAndCapture(const Station& station, const ModuleCatalog& catalog,
   for (int i = 0; i < 3; ++i) {
     BeginDrawing();
     ClearBackground(::Color{30, 30, 38, 255});
-    drawScene(station, catalog, camera, meshes, /*showGizmos=*/true, showMeshes);
+    // allConnectors: this harness exists to eyeball the snap/handedness convention,
+    // so show every module's connector markers + gizmo (the editor gates them).
+    drawScene(station, catalog, camera, meshes, /*showGizmos=*/true, showMeshes,
+              /*allConnectors=*/true);
     EndDrawing();
   }
   TakeScreenshot(outPath.c_str());  // captures the just-presented framebuffer

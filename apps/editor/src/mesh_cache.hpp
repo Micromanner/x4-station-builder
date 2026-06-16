@@ -10,6 +10,7 @@
 #include <optional>
 #include <string>
 #include <unordered_map>
+#include <unordered_set>
 
 namespace x4sb::editor {
 
@@ -29,9 +30,22 @@ class MeshCache {
   // lifetime of the cache (unordered_map node addresses are stable).
   [[nodiscard]] const ::Model* get(const std::string& gltfPath);
 
+  // True if `gltfPath` was rejected for exceeding raylib's 16-bit mesh-index
+  // limit (>65535 vertices -> truncated indices -> garbage triangles). Valid only
+  // after get(gltfPath) has been called (get() populates the verdict). Lets the
+  // caller box the WHOLE module rather than draw a corrupt or partial hull.
+  [[nodiscard]] bool isOversized(const std::string& gltfPath) const {
+    return oversized_.count(gltfPath) != 0;
+  }
+
  private:
   std::filesystem::path root_;
   std::unordered_map<std::string, std::optional<::Model>> cache_;  // nullopt = known-missing
+  std::unordered_set<std::string> oversized_;  // rejected: > 65535 verts (u16 index limit)
+  // Flat-shading shader (derivative-based face normals + two-sided Lambert), shared
+  // by every loaded model's material so solid modules read as 3D, not flat blobs.
+  ::Shader flatShader_{};
+  bool flatShaderOk_{false};
 };
 
 }  // namespace x4sb::editor

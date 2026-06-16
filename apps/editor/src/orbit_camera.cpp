@@ -20,7 +20,9 @@ void OrbitCamera::update() {
   }
   const float wheel = GetMouseWheelMove();
   if (wheel != 0.0f) {
-    distance_ = std::clamp(distance_ * (1.0f - wheel * 0.1f), 1.0f, 1000000.0f);
+    // The near plane now scales with this distance (render.cpp sceneClip), so the
+    // floor only needs to keep the eye off the exact target, not clear a fixed near.
+    distance_ = std::clamp(distance_ * (1.0f - wheel * 0.1f), 2.0f, 1000000.0f);
   }
   rebuild();
 }

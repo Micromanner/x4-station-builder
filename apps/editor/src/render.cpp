@@ -7,9 +7,12 @@
 #include "x4sb/data/types.hpp"
 
 #include <algorithm>
+#include <cmath>
 #include <cstdio>
 #include <optional>
 #include <string>
+#include <utility>
+#include <vector>
 
 namespace x4sb::editor {
 namespace {
@@ -33,6 +36,12 @@ const char* categoryName(Category c) {
   return "?";
 }
 
+// Opaque so a distant module collapsed to its box still reads against the dark
+// background (a translucent fill vanished — the whole-station "missing modules"
+// bug). Edge brighter than fill so adjacent boxes stay distinguishable.
+constexpr ::Color kBoxFill{86, 112, 150, 255};
+constexpr ::Color kBoxEdge{150, 188, 230, 255};
+
 // Draw a box for `def`'s local AABB under `xf`, nested in the current matrix.
 void drawModuleBox(const ModuleDef& def, const Transform& xf, ::Color fill, ::Color edge) {
   const Vec3 center = (def.aabb.min + def.aabb.max) * 0.5;
@@ -44,22 +53,35 @@ void drawModuleBox(const ModuleDef& def, const Transform& xf, ::Color fill, ::Co
   rlPopMatrix();
 }
 
-// Draw `def`'s glTF parts as wireframes under `xf`, each part nested in its own
-// localTransform. Returns true if at least one mesh drew; false (no mesh loaded)
-// signals the caller to fall back to the AABB box. Wireframe is winding-
-// independent, so the global culling state need not change.
+// Draw `def`'s glTF parts as SOLID flat-shaded meshes under `xf`, each part nested
+// in its own localTransform. Returns true if at least one mesh drew; false (no mesh
+// loaded) signals the caller to fall back to the AABB box. The caller must have
+// backface culling ENABLED: under the global (1,1,-1) flip the winding is exactly
+// what default back-face culling expects (confirmed empirically), so this both
+// renders correctly and is cheaper than drawing every triangle's back side.
 bool drawModuleMeshes(const ModuleDef& def, const Transform& xf, MeshCache& meshes, ::Color tint) {
-  bool drew = false;
+  // Resolve all parts first (get() caches): if ANY exceeds the u16 index limit,
+  // box the whole module — a hull missing its main part reads as broken, and a
+  // truncated-index part renders as garbage. A merely-missing optional part is
+  // tolerated (the present parts still draw).
+  bool anyPresent = false;
+  for (const MeshRef& ref : def.meshRefs) {
+    if (meshes.get(ref.gltfPath) != nullptr)
+      anyPresent = true;
+    else if (meshes.isOversized(ref.gltfPath))
+      return false;
+  }
+  if (!anyPresent) return false;
+
   for (const MeshRef& ref : def.meshRefs) {
     const ::Model* model = meshes.get(ref.gltfPath);
     if (model == nullptr) continue;
     rlPushMatrix();
     rlMultMatrixf(MatrixToFloatV(toRlMatrix(compose(xf, ref.localTransform))).v);
-    DrawModelWires(*model, ::Vector3{0, 0, 0}, 1.0f, tint);
+    DrawModel(*model, ::Vector3{0, 0, 0}, 1.0f, tint);
     rlPopMatrix();
-    drew = true;
   }
-  return drew;
+  return true;
 }
 
 void drawConnectors(const ModuleDef& def, const PlacedModule& pm) {
@@ -95,20 +117,37 @@ void drawAxisGizmo(const ModuleDef& def, const Transform& xf) {
   DrawSphere(toRl(fwd), static_cast<float>(maxExt) * 0.04f, BLUE);  // +Z forward tip
 }
 
-// Begin the 3D scene: X4-scale clip planes, the global (1,1,-1) handedness flip
-// + culling-off, and the translucent 20km build-volume plot box. Pairs with
-// endScene(). Shared by both drawScene overloads so the interactive path and the
-// --snaptest harness render through identical setup.
+// Depth-precision is the near/far RATIO, not the absolute near plane: a fixed
+// (10, 2e6) wrecked precision when zoomed out AND clipped nearby modules when
+// zoomed in. Scale both to the camera's orbit distance so the ratio stays ~modest
+// at every zoom (near small enough never to clip, far large enough to cover the
+// whole station from inside it).
+struct ClipRange {
+  double nearC;
+  double farC;
+};
+[[nodiscard]] ClipRange sceneClip(const ::Camera3D& cam) {
+  const double d = static_cast<double>(Vector3Distance(cam.position, cam.target));
+  // 60km far floor covers the 20km plot's diagonal from any inside vantage with
+  // margin (so nothing clips when zoomed in), while staying far tighter than the
+  // old fixed 2e6 — the near/far ratio, hence depth precision, is what matters.
+  return {std::clamp(d * 0.02, 1.5, 30.0), std::max(d * 4.0, 60000.0)};
+}
+
+// Begin the 3D scene: distance-scaled clip planes, the global (1,1,-1) handedness
+// flip, and the translucent 20km build-volume plot box. Backface culling is left
+// DISABLED here as the base state so the batched raylib primitives (plot box, LOD
+// boxes, connector spheres) — whose winding the flip inverts — render whole; the
+// mesh pass enables culling only around its own immediate draws. Pairs with
+// endScene().
 void beginScene(const ::Camera3D& camera) {
-  // X4 modules span tens to ~1500 units, far past raylib's default 1000-unit far
-  // plane. Push the clip planes out to X4 scale so geometry isn't clipped (must
-  // be set before BeginMode3D, which builds the projection from these).
-  rlSetClipPlanes(0.5, 2000000.0);
+  const ClipRange clip = sceneClip(camera);
+  rlSetClipPlanes(clip.nearC, clip.farC);  // must precede BeginMode3D (builds the projection)
 
   BeginMode3D(camera);
   rlPushMatrix();
   rlScalef(1.0f, 1.0f, -1.0f);  // X4 left-handed -> raylib right-handed (parent §4)
-  rlDisableBackfaceCulling();   // the -1 scale inverts winding; boxes/wires don't cull
+  rlDisableBackfaceCulling();
 
   // The 20x20x20 km station build volume (X4's max plot), centered on the origin.
   // Hardcoded for now (later adjustable); purely visual, no collision. Drawn like
@@ -121,25 +160,121 @@ void beginScene(const ::Camera3D& camera) {
 }
 
 void endScene() {
-  rlEnableBackfaceCulling();
+  rlDisableBackfaceCulling();  // batched primitives flush at EndMode3D — keep them unculled
   rlPopMatrix();
   EndMode3D();
+  rlEnableBackfaceCulling();  // restore raylib's default for whatever draws next
 }
 
-// Draw every placed module (mesh wireframe with box fallback, connectors, gizmo).
-// `selected` highlights one instance in yellow; pass nullopt for none.
+// Per-module level-of-detail + culling metrics, all in raylib DISPLAY space. The
+// camera lives in display space (the scene applies rlScalef(1,1,-1)), so the
+// module's X4-space center has its Z negated to match before any camera-relative
+// math.
+struct LodMetrics {
+  double along;      // depth along the view direction (negative = behind eye)
+  double lateral;    // distance of the center from the view axis
+  double radius;     // bounding-sphere radius
+  double pixelSize;  // projected radius in screen pixels (0 if behind)
+};
+
+// `projFactor` is screenH / (2*tan(fovy/2)), precomputed once per frame by the
+// caller — identical for every module, so this stays free of per-module trig and
+// global-state queries.
+[[nodiscard]] LodMetrics lodMetrics(const ModuleDef& def, const PlacedModule& pm,
+                                    const ::Camera3D& cam, double projFactor) {
+  const AABB wbox = worldAabb(def.aabb, pm.worldTransform);  // X4 space
+  const Vec3 c = (wbox.min + wbox.max) * 0.5;
+  const double r = length(wbox.max - wbox.min) * 0.5;
+  const Vec3 dc{c.x, c.y, -c.z};  // X4 -> display space
+
+  const Vec3 camPos{cam.position.x, cam.position.y, cam.position.z};
+  const Vec3 camTgt{cam.target.x, cam.target.y, cam.target.z};
+  const Vec3 view = camTgt - camPos;
+  const double viewLen = length(view);
+  const Vec3 fwd = viewLen > 0 ? view * (1.0 / viewLen) : Vec3{0, 0, 1};
+
+  const Vec3 rel = dc - camPos;
+  const double along = dot(rel, fwd);
+  const double lateral = length(rel - fwd * along);
+  const double pixelSize = along > 0 ? (r / along) * projFactor : 0.0;
+  return {along, lateral, r, pixelSize};
+}
+
+// Per-frame view constants shared by the cull test (so it stays free of trig).
+struct ViewCull {
+  double tanDiag;  // tangent of the half-angle to a frustum CORNER (circumscribed cone)
+  double farC;     // far clip distance
+};
+[[nodiscard]] ViewCull viewCull(const ::Camera3D& cam) {
+  const double tanV = std::tan(static_cast<double>(cam.fovy) * static_cast<double>(DEG2RAD) * 0.5);
+  const double aspect =
+      static_cast<double>(GetScreenWidth()) / static_cast<double>(GetScreenHeight());
+  const double tanH = tanV * aspect;
+  return {std::sqrt(tanH * tanH + tanV * tanV), sceneClip(cam).farC};
+}
+
+// Conservative cull: drop a module only when its bounding sphere is wholly behind
+// the eye, wholly past the far plane, or wholly outside a cone that CIRCUMSCRIBES
+// the view frustum (so a corner-of-screen module is never wrongly removed). This
+// replaces the old behind-only cull with a real off-screen reject (the win when
+// zoomed into a big station), without the over-cull risk of an inscribed cone.
+[[nodiscard]] bool frustumCull(const LodMetrics& m, const ViewCull& v) {
+  if (m.along < -m.radius) return true;
+  if (m.along - m.radius > v.farC) return true;
+  return m.along > 0 && m.lateral > m.along * v.tanDiag + m.radius;
+}
+
+// Tunable pixel threshold: a module whose projected radius is under kMeshPx draws
+// as a cheap opaque box instead of its full mesh. The selected module always draws
+// full detail.
+constexpr float kMeshPx = 12.0f;
+
+// Draw every placed module at a cost matched to its on-screen size, in two passes
+// so each gets the culling state it needs: solid meshes (backface-culled) first,
+// then the opaque LOD/fallback boxes (unculled), then connectors+gizmo for the
+// selected module ONLY (drawing them for every near module was the bulk of the
+// clutter and draw-call cost on a big station). `selected` also forces its module
+// to full detail; pass nullopt for none.
 void drawPlacedModules(const Station& station, const ModuleCatalog& catalog,
                        std::optional<InstanceId> selected, MeshCache& meshes, bool showGizmos,
-                       bool showMeshes) {
+                       bool showMeshes, const ::Camera3D& camera, bool allConnectors) {
+  const double projFactor =
+      static_cast<double>(GetScreenHeight()) /
+      (2.0 * std::tan(static_cast<double>(camera.fovy) * static_cast<double>(DEG2RAD) * 0.5));
+  const ViewCull vc = viewCull(camera);
+
+  // Pass 1: solid meshes. Backface culling on — correct + cheaper under the flip.
+  rlEnableBackfaceCulling();
+  std::vector<std::pair<const ModuleDef*, const PlacedModule*>> boxes;
   for (const auto& pm : station.modules()) {
     const ModuleDef* def = catalog.find(pm.defId);
     if (def == nullptr) continue;
     const bool sel = selected.has_value() && *selected == pm.instanceId;
-    // Mesh wireframe when enabled, else (or if no mesh loads) the AABB box.
-    const ::Color wire = sel ? YELLOW : LIGHTGRAY;
-    if (!showMeshes || !drawModuleMeshes(*def, pm.worldTransform, meshes, wire)) {
-      drawModuleBox(*def, pm.worldTransform, ::Color{120, 160, 200, 90}, sel ? YELLOW : DARKBLUE);
-    }
+    const LodMetrics lod = lodMetrics(*def, pm, camera, projFactor);
+    if (!sel && frustumCull(lod, vc)) continue;
+
+    const bool detailed = sel || lod.pixelSize >= static_cast<double>(kMeshPx);
+    const ::Color tint = sel ? YELLOW : LIGHTGRAY;
+    if (!(detailed && showMeshes && drawModuleMeshes(*def, pm.worldTransform, meshes, tint)))
+      boxes.emplace_back(def, &pm);
+  }
+  rlDisableBackfaceCulling();
+
+  // Pass 2: opaque boxes (batched, unculled) for distant + mesh-less modules.
+  for (const auto& [def, pm] : boxes) {
+    const bool sel = selected.has_value() && *selected == pm->instanceId;
+    drawModuleBox(*def, pm->worldTransform, sel ? ::Color{180, 160, 40, 255} : kBoxFill,
+                  sel ? YELLOW : kBoxEdge);
+  }
+
+  // Pass 3: detail markers. Interactive editor shows them for the SELECTED module
+  // only (the forest of every-module connectors was the bulk of big-station
+  // clutter + cost); the snap-eyeball harness opts into all of them.
+  for (const auto& pm : station.modules()) {
+    const bool sel = selected.has_value() && *selected == pm.instanceId;
+    if (!allConnectors && !sel) continue;
+    const ModuleDef* def = catalog.find(pm.defId);
+    if (def == nullptr) continue;
     drawConnectors(*def, pm);
     if (showGizmos) drawAxisGizmo(*def, pm.worldTransform);
   }
@@ -147,12 +282,36 @@ void drawPlacedModules(const Station& station, const ModuleCatalog& catalog,
 
 }  // namespace
 
+RenderStats lodStats(const Station& station, const ModuleCatalog& catalog,
+                     const ::Camera3D& camera) {
+  const double projFactor =
+      static_cast<double>(GetScreenHeight()) /
+      (2.0 * std::tan(static_cast<double>(camera.fovy) * static_cast<double>(DEG2RAD) * 0.5));
+  const ViewCull vc = viewCull(camera);
+  RenderStats s;
+  for (const auto& pm : station.modules()) {
+    const ModuleDef* def = catalog.find(pm.defId);
+    if (def == nullptr) continue;
+    ++s.total;
+    const LodMetrics lod = lodMetrics(*def, pm, camera, projFactor);
+    if (frustumCull(lod, vc)) {
+      ++s.culled;
+      continue;
+    }
+    if (lod.pixelSize >= static_cast<double>(kMeshPx))
+      ++s.drawnDetailed;
+    else
+      ++s.drawnBox;
+  }
+  return s;
+}
+
 void drawScene(const EditorState& state, const ::Camera3D& camera, MeshCache& meshes,
                bool showGizmos, bool showMeshes) {
   beginScene(camera);
 
   drawPlacedModules(state.station(), state.catalog(), state.selected(), meshes, showGizmos,
-                    showMeshes);
+                    showMeshes, camera, /*allConnectors=*/false);
 
   if (state.ghost()) {
     const ModuleDef* gdef = state.defFor(state.ghost()->defId);
@@ -160,10 +319,11 @@ void drawScene(const EditorState& state, const ::Camera3D& camera, MeshCache& me
       const ::Color fill =
           state.ghost()->valid ? ::Color{0, 220, 0, 90} : ::Color{220, 0, 0, 90};
       const ::Color edge = state.ghost()->valid ? GREEN : RED;
-      if (!showMeshes ||
-          !drawModuleMeshes(*gdef, state.ghost()->worldTransform, meshes, edge)) {
-        drawModuleBox(*gdef, state.ghost()->worldTransform, fill, edge);
-      }
+      rlEnableBackfaceCulling();
+      const bool drew =
+          showMeshes && drawModuleMeshes(*gdef, state.ghost()->worldTransform, meshes, edge);
+      rlDisableBackfaceCulling();
+      if (!drew) drawModuleBox(*gdef, state.ghost()->worldTransform, fill, edge);
       if (showGizmos) drawAxisGizmo(*gdef, state.ghost()->worldTransform);
     }
   }
@@ -172,9 +332,10 @@ void drawScene(const EditorState& state, const ::Camera3D& camera, MeshCache& me
 }
 
 void drawScene(const Station& station, const ModuleCatalog& catalog, const ::Camera3D& camera,
-               MeshCache& meshes, bool showGizmos, bool showMeshes) {
+               MeshCache& meshes, bool showGizmos, bool showMeshes, bool allConnectors) {
   beginScene(camera);
-  drawPlacedModules(station, catalog, std::nullopt, meshes, showGizmos, showMeshes);
+  drawPlacedModules(station, catalog, std::nullopt, meshes, showGizmos, showMeshes, camera,
+                    allConnectors);
   endScene();
 }
 

@@ -20,9 +20,24 @@ void drawScene(const EditorState& state, const ::Camera3D& camera, MeshCache& me
                bool showGizmos, bool showMeshes);
 
 // Same scene from a raw Station + catalog (no selection, no ghost) — used by the
-// --snaptest visual-regression harness so it renders through the identical path.
+// --snaptest / --megashot harnesses so they render through the identical path.
+// The interactive editor shows connector markers for the selected module only;
+// `allConnectors` forces them for every module (the snap-eyeball harness wants all,
+// a big-station shot wants none).
 void drawScene(const Station& station, const ModuleCatalog& catalog, const ::Camera3D& camera,
-               MeshCache& meshes, bool showGizmos, bool showMeshes);
+               MeshCache& meshes, bool showGizmos, bool showMeshes, bool allConnectors = false);
+
+// Diagnostic: tally the per-module LOD/cull decisions for a camera without
+// drawing, reusing the exact metrics drawScene uses. Lets a headless harness
+// quantify what a large station keeps vs. culls vs. collapses-to-box per view.
+struct RenderStats {
+  int total{0};          // modules with a resolvable def
+  int culled{0};         // rejected by the frustum cull (behind / past far / off-cone)
+  int drawnDetailed{0};  // above the mesh pixel threshold (full mesh)
+  int drawnBox{0};       // below it (cheap AABB box)
+};
+[[nodiscard]] RenderStats lodStats(const Station& station, const ModuleCatalog& catalog,
+                                   const ::Camera3D& camera);
 
 // Draw the 2D HUD overlay (active module, filter, counts, undo state, controls).
 void drawHud(const EditorState& state, int screenWidth, int screenHeight, bool showGizmos);
