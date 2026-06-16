@@ -58,6 +58,17 @@ TEST_CASE("parseXmf rejects non-XUMF / truncated data") {
   CHECK_FALSE(parseXmf(std::string(64, '\0')).has_value());
 }
 
+TEST_CASE("xmfVertexCount reads the vertex count from the descriptor only") {
+  const auto n = xmfVertexCount(fixture());
+  REQUIRE(n.has_value());
+  CHECK(*n == 4u);  // the tetra fixture has 4 vertices
+}
+
+TEST_CASE("xmfVertexCount rejects non-XUMF data") {
+  CHECK_FALSE(xmfVertexCount("not a mesh at all").has_value());
+  CHECK_FALSE(xmfVertexCount(std::string(8, '\0')).has_value());
+}
+
 TEST_CASE("meshToGltf emits valid glTF 2.0 with matching counts and an embedded buffer") {
   const auto mesh = parseXmf(fixture());
   REQUIRE(mesh.has_value());

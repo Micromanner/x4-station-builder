@@ -24,6 +24,14 @@ bool pointIsLinked(const PlacedModule& m, const std::string& pointId) {
   return false;
 }
 
+// A mesh-ref is the structural hull when its part name (after "__" in the cache
+// path) begins "part". An oversized hull can't render, so the whole module boxes;
+// an oversized detail/anim greeble is merely skipped so the hull still draws.
+bool meshRefIsStructural(const std::string& gltfPath) {
+  const std::size_t sep = gltfPath.rfind("__");
+  return sep != std::string::npos && gltfPath.compare(sep + 2, 4, "part") == 0;
+}
+
 const char* categoryName(Category c) {
   switch (c) {
     case Category::Production: return "Production";
@@ -61,15 +69,16 @@ void drawModuleBox(const ModuleDef& def, const Transform& xf, ::Color fill, ::Co
 // what default back-face culling expects (confirmed empirically), so this both
 // renders correctly and is cheaper than drawing every triangle's back side.
 bool drawModuleMeshes(const ModuleDef& def, const Transform& xf, MeshCache& meshes, ::Color tint) {
-  // Resolve all parts first (get() caches): if ANY exceeds the u16 index limit,
-  // box the whole module — a hull missing its main part reads as broken, and a
-  // truncated-index part renders as garbage. A merely-missing optional part is
-  // tolerated (the present parts still draw).
+  // Resolve all parts first (get() caches). An oversized part (>u16 indices) would
+  // render as wrapped-index garbage, so it can't draw: box the whole module only
+  // when the oversized part is the structural hull (a hull-less module reads as
+  // broken); skip an oversized detail/anim greeble and let the hull still draw.
+  // Most oversized parts are lod0-only detail greebles the LOD pass can't shrink.
   bool anyPresent = false;
   for (const MeshRef& ref : def.meshRefs) {
     if (meshes.get(ref.gltfPath) != nullptr)
       anyPresent = true;
-    else if (meshes.isOversized(ref.gltfPath))
+    else if (meshes.isOversized(ref.gltfPath) && meshRefIsStructural(ref.gltfPath))
       return false;
   }
   if (!anyPresent) return false;

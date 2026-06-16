@@ -180,3 +180,61 @@ TEST_CASE("parseComponentGeometry normalizes a double-backslash / trailing-slash
   REQUIRE(geo.parts.size() == 1);
   CHECK(geo.parts[0].name == "part_main");
 }
+
+TEST_CASE("isVisualPart keeps structural/detail/animated geometry") {
+  // The render policy: draw the hull, its greebles, and animated visual parts.
+  CHECK(isVisualPart("part_main"));
+  CHECK(isVisualPart("part_ring"));
+  CHECK(isVisualPart("detail_s_main"));
+  CHECK(isVisualPart("detail_l_radiator"));  // a radiator greeble, not its collisionbox
+  CHECK(isVisualPart("anim_arrows"));
+  CHECK(isVisualPart("anim_poslights"));
+  CHECK(isVisualPart("anim_hatch"));
+}
+
+TEST_CASE("isVisualPart drops effects and non-visual helper geometry") {
+  // fx_* are decals/glows/fieldlines (one spans 40km) — never solid geometry.
+  CHECK_FALSE(isVisualPart("fx_decals"));
+  CHECK_FALSE(isVisualPart("fx_fieldlines"));
+  CHECK_FALSE(isVisualPart("fx_glow"));
+  // Pure non-visual helpers: collision/bounds/trigger/dummy/emitter volumes.
+  CHECK_FALSE(isVisualPart("collisionbox"));
+  CHECK_FALSE(isVisualPart("bounding_box"));
+  CHECK_FALSE(isVisualPart("damagearea"));
+  CHECK_FALSE(isVisualPart("triggerpart_slowzone"));
+  CHECK_FALSE(isVisualPart("scaledummy"));
+  CHECK_FALSE(isVisualPart("scaledummy017"));
+  CHECK_FALSE(isVisualPart("geometryinvisible"));
+  CHECK_FALSE(isVisualPart("darkening_bubble"));
+  CHECK_FALSE(isVisualPart("emitterfx01"));
+  CHECK_FALSE(isVisualPart("editor_arrow"));
+  // A non-visual token under a visual prefix must still drop (substring, not prefix).
+  CHECK_FALSE(isVisualPart("detail_l_radiator_collisionbox"));
+}
+
+TEST_CASE("partXmfPathLod builds the LOD-suffixed source path; partXmfPath stays lod0") {
+  CHECK(partXmfPathLod("g/f", "part_main", 0) == "g/f/part_main-lod0.xmf");
+  CHECK(partXmfPathLod("g/f", "part_main", 2) == "g/f/part_main-lod2.xmf");
+  CHECK(partXmfPath("g/f", "part_main") == "g/f/part_main-lod0.xmf");
+}
+
+TEST_CASE("parseComponentGeometry keeps only visual parts") {
+  // Mixed module: one hull part plus an fx decal and a collision box. Only the
+  // hull is renderable; the converter and catalog must see just that.
+  const char* xml = R"(<?xml version="1.0"?>
+<components>
+  <component name="mixed_01" class="production">
+    <source geometry="g/mixed_data"/>
+    <connections>
+      <connection name="C1" tags="part"><parts><part name="part_main"/></parts></connection>
+      <connection name="C2" tags="part"><parts><part name="fx_decals"/></parts></connection>
+      <connection name="C3" tags="part"><parts><part name="collisionbox"/></parts></connection>
+      <connection name="C4" tags="part"><parts><part name="detail_s_main"/></parts></connection>
+    </connections>
+  </component>
+</components>)";
+  const ComponentGeometry geo = parseComponentGeometry(xml);
+  REQUIRE(geo.parts.size() == 2);
+  CHECK(geo.parts[0].name == "part_main");
+  CHECK(geo.parts[1].name == "detail_s_main");
+}

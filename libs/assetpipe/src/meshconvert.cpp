@@ -15,6 +15,21 @@ namespace x4sb {
 
 namespace fs = std::filesystem;
 
+std::optional<int> chooseMeshLod(const std::array<std::optional<std::uint32_t>, 4>& counts,
+                                 std::uint32_t budget) {
+  // Most-detailed (lowest index) LOD whose vertex count fits the budget.
+  for (std::size_t i = 0; i < counts.size(); ++i)
+    if (counts[i] && *counts[i] <= budget) return static_cast<int>(i);
+  // None fit: fall back to the available LOD with the fewest vertices.
+  std::optional<std::size_t> best;
+  for (std::size_t i = 0; i < counts.size(); ++i) {
+    if (!counts[i]) continue;
+    if (!best || *counts[i] < *counts[*best]) best = i;
+  }
+  if (best) return static_cast<int>(*best);
+  return std::nullopt;
+}
+
 MeshConvertResult convertModuleMeshes(const ExtractFn& extract,
                                       const std::vector<std::string>& sources,
                                       const std::string& outDir, bool force,
@@ -54,14 +69,32 @@ MeshConvertResult convertModuleMeshes(const ExtractFn& extract,
             continue;
           }
 
-          const std::string logical = partXmfPath(geo.geometryFolder, part.name);
-          const std::optional<std::string> meshBytes = extract(logical);
-          if (!meshBytes) {
-            ++res.failed;
-            note("[fail] " + rel + " (no " + logical + ")");
-            continue;
+          // Pick the most-detailed LOD that fits raylib's u16 index limit. lod0 is
+          // the common case (most parts have no lower LOD and already fit), so only
+          // probe lod1-3 when lod0 is missing or too dense — keeps the batch fast.
+          std::array<std::optional<std::string>, 4> lodBytes;
+          std::array<std::optional<std::uint32_t>, 4> lodCounts;
+          lodBytes[0] = extract(partXmfPathLod(geo.geometryFolder, part.name, 0));
+          if (lodBytes[0]) lodCounts[0] = xmfVertexCount(*lodBytes[0]);
+
+          int chosen = 0;
+          const bool lod0Fits = lodCounts[0] && *lodCounts[0] <= kU16VertexLimit;
+          if (!lod0Fits) {
+            for (int lod = 1; lod < 4; ++lod) {
+              const auto idx = static_cast<std::size_t>(lod);
+              lodBytes[idx] = extract(partXmfPathLod(geo.geometryFolder, part.name, lod));
+              if (lodBytes[idx]) lodCounts[idx] = xmfVertexCount(*lodBytes[idx]);
+            }
+            const std::optional<int> pick = chooseMeshLod(lodCounts, kU16VertexLimit);
+            if (!pick) {
+              ++res.failed;
+              note("[fail] " + rel + " (no LOD source)");
+              continue;
+            }
+            chosen = *pick;
           }
-          const std::optional<XmfMesh> mesh = parseXmf(*meshBytes);
+
+          const std::optional<XmfMesh> mesh = parseXmf(*lodBytes[static_cast<std::size_t>(chosen)]);
           if (!mesh) {
             ++res.failed;
             note("[fail] " + rel + " (xmf parse failed)");
@@ -73,7 +106,12 @@ MeshConvertResult convertModuleMeshes(const ExtractFn& extract,
             continue;
           }
           ++res.converted;
-          note("[ok]   " + rel);
+          if (chosen > 0) {
+            ++res.reducedLod;
+            note("[ok]   " + rel + " (lod" + std::to_string(chosen) + ")");
+          } else {
+            note("[ok]   " + rel);
+          }
         }
       },
       skipped);

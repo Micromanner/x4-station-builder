@@ -4,6 +4,7 @@
 
 #include <doctest/doctest.h>
 
+#include <array>
 #include <cstdint>
 #include <filesystem>
 #include <memory>
@@ -119,6 +120,27 @@ TEST_CASE("meshGltfPath composes the cache-relative path") {
   CHECK(meshGltfPath("foo_macro", "part_main") == "meshes/foo_macro__part_main.gltf");
 }
 
+TEST_CASE("chooseMeshLod picks the most-detailed LOD within budget") {
+  using A = std::array<std::optional<std::uint32_t>, 4>;
+  // lod0 already fits -> keep full detail.
+  CHECK(chooseMeshLod(A{40000u, 10000u, 5000u, 1000u}, 65535) == 0);
+  // lod0 oversized; lod2 is the most detailed that fits (mirrors pier_spl_harbor_03).
+  CHECK(chooseMeshLod(A{600000u, 250000u, 63000u, 6000u}, 65535) == 2);
+  // only lod3 fits (mirrors storage_ter_l_container_01).
+  CHECK(chooseMeshLod(A{419000u, 309000u, 113000u, 30000u}, 65535) == 3);
+  // lod0 missing but lod1 fits -> fall through to it.
+  CHECK(chooseMeshLod(A{std::nullopt, 50000u, 10000u, std::nullopt}, 65535) == 1);
+}
+
+TEST_CASE("chooseMeshLod falls back to the fewest-vertex LOD when none fit") {
+  using A = std::array<std::optional<std::uint32_t>, 4>;
+  // None fit the budget: pick the smallest (it will still box, but best effort).
+  CHECK(chooseMeshLod(A{900000u, 800000u, 700000u, 70000u}, 65535) == 3);
+  // Nothing shipped at all -> no choice.
+  CHECK_FALSE(chooseMeshLod(A{std::nullopt, std::nullopt, std::nullopt, std::nullopt}, 65535)
+                  .has_value());
+}
+
 TEST_CASE("convertModuleMeshes writes exactly the paths buildModuleCatalog records") {
   const ExtractFn extract = makeFakeInstall();
   TempDir out;
@@ -155,6 +177,32 @@ TEST_CASE("convertModuleMeshes writes exactly the paths buildModuleCatalog recor
       convertModuleMeshes(extract, {""}, out.path.string(), /*force=*/true, nullptr);
   CHECK(forced.converted == 2);
   CHECK(forced.skipped == 0);
+}
+
+TEST_CASE("convertModuleMeshes falls back to a lower LOD when lod0 is absent") {
+  auto files = std::make_shared<FileMap>();
+  (*files)["libraries/wares.xml"] = R"(<wares>
+    <ware id="module_y" name="{1,1}" tags="module"><component ref="y_macro"/></ware>
+  </wares>)";
+  (*files)["index/macros.xml"] = R"(<index><entry name="y_macro" value="m/y"/></index>)";
+  (*files)["index/components.xml"] = R"(<index><entry name="y_comp" value="c/y"/></index>)";
+  (*files)["m/y.xml"] =
+      R"(<macros><macro name="y_macro" class="production"><component ref="y_comp"/></macro></macros>)";
+  (*files)["c/y.xml"] = R"(<components><component name="y_comp">
+    <source geometry="g/y"/>
+    <connections><connection name="C" tags="part"><parts><part name="part_main"/></parts></connection></connections>
+  </component></components>)";
+  // Only lod2 is shipped (no lod0/lod1): the converter must probe and use it.
+  (*files)["g/y/part_main-lod2.xmf"] = tetraXmf();
+  const ExtractFn extract = extractFrom(std::move(files));
+
+  TempDir out;
+  const MeshConvertResult conv =
+      convertModuleMeshes(extract, {""}, out.path.string(), /*force=*/false, nullptr);
+  CHECK(conv.converted == 1);
+  CHECK(conv.failed == 0);
+  CHECK(conv.reducedLod == 1);  // fell back below lod0
+  CHECK(fs::exists(out.path / meshGltfPath("y_macro", "part_main")));
 }
 
 TEST_CASE("convertModuleMeshes counts a missing source mesh as failed") {

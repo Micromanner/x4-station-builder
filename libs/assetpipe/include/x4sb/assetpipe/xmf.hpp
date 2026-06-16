@@ -24,4 +24,10 @@ struct XmfMesh {
 // XUMF mesh (bad magic, truncated, or a buffer fails to decompress).
 [[nodiscard]] std::optional<XmfMesh> parseXmf(const std::string& bytes);
 
+// The vertex count of a XUMF mesh, read straight from the first vertex chunk's
+// descriptor (no decompression), or nullopt if the bytes are not a valid XUMF
+// mesh. Lets the converter pick a LOD that fits a vertex budget before paying to
+// inflate the buffers.
+[[nodiscard]] std::optional<std::uint32_t> xmfVertexCount(const std::string& bytes);
+
 }  // namespace x4sb

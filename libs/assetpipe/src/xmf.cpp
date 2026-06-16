@@ -110,4 +110,19 @@ std::optional<XmfMesh> parseXmf(const std::string& bytes) {
   return mesh;
 }
 
+std::optional<std::uint32_t> xmfVertexCount(const std::string& bytes) {
+  if (bytes.size() < 0x40 || std::memcmp(bytes.data(), "XUMF", 4) != 0) return std::nullopt;
+  const std::size_t headerSize = readLE<std::uint8_t>(bytes, 6);
+  const std::size_t numChunks = readLE<std::uint8_t>(bytes, 8);
+  const std::size_t descSize = readLE<std::uint8_t>(bytes, 9);
+  if (descSize < kStrideOff + 4) return std::nullopt;
+  if (headerSize + numChunks * descSize > bytes.size()) return std::nullopt;
+  for (std::size_t i = 0; i < numChunks; ++i) {
+    const std::size_t d = headerSize + i * descSize;
+    if (readLE<std::uint32_t>(bytes, d + kTypeOff) == kTypeVertex)
+      return readLE<std::uint32_t>(bytes, d + kCountOff);
+  }
+  return std::nullopt;
+}
+
 }  // namespace x4sb

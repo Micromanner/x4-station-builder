@@ -6,6 +6,7 @@
 
 #include <algorithm>
 #include <sstream>
+#include <string_view>
 
 namespace x4sb {
 namespace {
@@ -103,6 +104,28 @@ std::vector<ConnectionPoint> snapConnectionPoints(const std::string& componentXm
   return out;
 }
 
+bool isVisualPart(std::string_view name) {
+  const auto startsWith = [name](std::string_view p) { return name.substr(0, p.size()) == p; };
+  const auto contains = [name](std::string_view s) {
+    return name.find(s) != std::string_view::npos;
+  };
+
+  // Effects (decals/glows/fieldlines/lightcones), particle emitters, and
+  // scale/editor dummies are prefix-tagged and never render as solid geometry.
+  if (startsWith("fx_") || startsWith("emitterfx") || startsWith("scaledummy") ||
+      startsWith("editor")) {
+    return false;
+  }
+  // Pure non-visual volumes (collision/bounds/trigger/darkening). The token can
+  // sit under a visual prefix (e.g. "detail_l_radiator_collisionbox"), so match
+  // it anywhere in the name rather than only as a prefix.
+  if (contains("collisionbox") || contains("bounding") || contains("damagearea") ||
+      contains("triggerpart") || contains("darkening") || name == "geometryinvisible") {
+    return false;
+  }
+  return true;
+}
+
 ComponentGeometry parseComponentGeometry(const std::string& componentXml) {
   ComponentGeometry geo;
   pugi::xml_document doc;
@@ -119,13 +142,20 @@ ComponentGeometry parseComponentGeometry(const std::string& componentXml) {
         ComponentPart cp;
         cp.name = part.attribute("name").as_string();
         cp.offset = offset;
-        if (!cp.name.empty()) geo.parts.push_back(std::move(cp));
+        // Drop effects and non-visual helpers here, the one chokepoint both the
+        // catalog (mesh-refs) and the converter walk, so neither references them.
+        if (!cp.name.empty() && isVisualPart(cp.name)) geo.parts.push_back(std::move(cp));
       });
   return geo;
 }
 
 std::string partXmfPath(const std::string& geometryFolder, const std::string& partName) {
-  return geometryFolder + "/" + partName + "-lod0.xmf";
+  return partXmfPathLod(geometryFolder, partName, 0);
+}
+
+std::string partXmfPathLod(const std::string& geometryFolder, const std::string& partName,
+                           int lod) {
+  return geometryFolder + "/" + partName + "-lod" + std::to_string(lod) + ".xmf";
 }
 
 AABB moduleAabb(const std::string& componentXml) {

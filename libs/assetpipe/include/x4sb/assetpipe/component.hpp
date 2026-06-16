@@ -5,6 +5,7 @@
 #include "x4sb/data/types.hpp"
 
 #include <string>
+#include <string_view>
 #include <vector>
 
 namespace x4sb {
@@ -42,6 +43,15 @@ struct ComponentGeometry {
   std::vector<ComponentPart> parts;  // connections tagged "part"
 };
 
+// True if a part name denotes renderable hull geometry (structural `part_*`,
+// greeble `detail_*`, or animated visual `anim_*`) rather than an effect or a
+// non-visual helper. X4 modules also ship `fx_*` effects (decals, glows,
+// galaxy-scale fieldlines) and collision/bounds/trigger/dummy/emitter volumes;
+// drawing those as solid geometry produces sheets and spikes, so they are
+// excluded from the visual part list. Matches by token, not just prefix, because
+// a helper can hide under a visual prefix (e.g. `detail_l_radiator_collisionbox`).
+[[nodiscard]] bool isVisualPart(std::string_view partName);
+
 // Parse the geometry source folder and visual part list from a component XML.
 ComponentGeometry parseComponentGeometry(const std::string& componentXml);
 
@@ -51,6 +61,12 @@ ComponentGeometry parseComponentGeometry(const std::string& componentXml);
 // this so the LOD-suffix/join convention lives in exactly one place.
 [[nodiscard]] std::string partXmfPath(const std::string& geometryFolder,
                                       const std::string& partName);
+
+// Like partXmfPath but for an explicit LOD level (0 = highest detail), e.g.
+// "<geometryFolder>/part_main-lod2.xmf". The converter probes successive LODs to
+// find the most detailed one that fits raylib's 16-bit mesh-index limit.
+[[nodiscard]] std::string partXmfPathLod(const std::string& geometryFolder,
+                                         const std::string& partName, int lod);
 
 // The module's overall AABB in module-local space: the union of each visual
 // part's <size>/<max> half-extents about <size>/<center>, transformed by the
