@@ -105,6 +105,7 @@ int main(int argc, char** argv) {
     }
   }
 
+  SetConfigFlags(FLAG_WINDOW_RESIZABLE);
   InitWindow(kScreenW, kScreenH, "X4 Station Builder");
   SetTargetFPS(60);
 
@@ -152,8 +153,8 @@ int main(int argc, char** argv) {
       BeginDrawing();
       ClearBackground(::Color{30, 30, 38, 255});
       x4sb::editor::drawScene(state, cam.camera(), meshes, showGizmos, showMeshes);
-      x4sb::editor::drawHud(state, kScreenW, kScreenH, showGizmos);
-      if (GetTime() < toastUntil) x4sb::editor::drawToast(toast, kScreenH);
+      x4sb::editor::drawHud(state, GetScreenWidth(), GetScreenHeight(), showGizmos);
+      if (GetTime() < toastUntil) x4sb::editor::drawToast(toast, GetScreenHeight());
       EndDrawing();
       FrameMark;
     }

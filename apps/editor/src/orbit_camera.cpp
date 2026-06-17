@@ -10,7 +10,7 @@ namespace x4sb::editor {
 
 OrbitCamera::OrbitCamera() {
   cam_.up = ::Vector3{0.0f, 1.0f, 0.0f};
-  cam_.fovy = 45.0f;
+  cam_.fovy = 60.0f;
   cam_.projection = CAMERA_PERSPECTIVE;
   rebuild();
 }
