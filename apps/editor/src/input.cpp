@@ -3,6 +3,7 @@
 #include "raylib_convert.hpp"  // toRl
 
 #include "x4sb/editorcore/display_flip.hpp"
+#include "x4sb/snap/pick.hpp"
 
 #include "raymath.h"  // Vector3Distance
 

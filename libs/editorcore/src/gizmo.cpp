@@ -67,20 +67,7 @@ void planeBasis(GizmoHandle h, Vec3& u, Vec3& v) {
   }
 }
 
-// Parameter s on the infinite line (p + s*axis) closest to the ray (o + t*d).
-// The line is infinite here (unlike hit-testing) so a drag can run past the
-// handle's drawn length.
-double closestLineParamToRay(Vec3 p, Vec3 axis, Vec3 o, Vec3 d) {
-  const Vec3 w0 = p - o;
-  const double a = dot(axis, axis);
-  const double b = dot(axis, d);
-  const double c = dot(d, d);
-  const double dd = dot(axis, w0);
-  const double e = dot(d, w0);
-  const double denom = a * c - b * b;
-  if (denom < 1e-12) return 0.0;  // ray parallel to axis: no resolvable motion
-  return (b * e - c * dd) / denom;
-}
+
 
 }  // namespace
 
@@ -199,8 +186,38 @@ Vec3 gizmoDragDelta(GizmoHandle handle, Vec3 origin, Vec3 startRayOrigin, Vec3 s
                     Vec3 curRayOrigin, Vec3 curRayDir) {
   if (gizmoIsAxis(handle)) {
     const Vec3 axis = gizmoAxisDir(handle);
-    const double sStart = closestLineParamToRay(origin, axis, startRayOrigin, startRayDir);
-    const double sCur = closestLineParamToRay(origin, axis, curRayOrigin, curRayDir);
+    // Project the mouse ray onto a camera-facing plane containing the drag axis.
+    // Using the closest distance between skew lines (closestLineParamToRay) is
+    // highly sensitive to camera view angles, causing sluggishness when looking perpendicular
+    // to the axis, and hyper-sensitivity/singularities when looking parallel.
+    // Projections onto a camera-facing plane avoid this and yield consistent mouse response.
+    Vec3 n = startRayDir - axis * dot(startRayDir, axis);
+    const double lenN = length(n);
+    if (lenN < 1e-6) {
+      if (std::abs(axis.x) < 0.5) {
+        n = {1, 0, 0};
+      } else if (std::abs(axis.y) < 0.5) {
+        n = {0, 1, 0};
+      } else {
+        n = {0, 0, 1};
+      }
+      n = n - axis * dot(n, axis);
+      const double len = length(n);
+      n = len < 1e-12 ? Vec3{0, 0, 0} : n * (1.0 / len);
+    } else {
+      n = n * (1.0 / lenN);
+    }
+
+    auto projectRay = [&](Vec3 o, Vec3 d) -> double {
+      const double denom = dot(d, n);
+      if (std::abs(denom) < 1e-12) return 0.0;
+      const double t = dot(origin - o, n) / denom;
+      const Vec3 hit = o + d * t;
+      return dot(hit - origin, axis);
+    };
+
+    const double sStart = projectRay(startRayOrigin, startRayDir);
+    const double sCur = projectRay(curRayOrigin, curRayDir);
     return axis * (sCur - sStart);
   }
   const Vec3 n = gizmoPlaneNormal(handle);

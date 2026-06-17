@@ -381,3 +381,36 @@ TEST_CASE("gizmo drag: a rotation ring spins the module in place and commits") {
   const Vec3 r0 = rotate(s.station().find(id)->worldTransform.rotation, Vec3{1, 0, 0});
   CHECK(r0.x == doctest::Approx(1).epsilon(1e-9));
 }
+
+TEST_CASE("plot boundary box validation constraints") {
+  const ModuleCatalog c = twoModuleCatalog();
+  EditorState s(c);
+
+  // 1. Ghost inside is valid, ghost outside (e.g. at 12000m) is invalid
+  s.setPlaceDistance(100.0);
+  s.updateGhost(Vec3{0, 0, 0}, Vec3{1, 0, 0}); // pos = 100,0,0
+  REQUIRE(s.ghost().has_value());
+  CHECK(s.ghost()->valid);
+
+  s.setPlaceDistance(12000.0);
+  s.updateGhost(Vec3{0, 0, 0}, Vec3{1, 0, 0}); // pos = 12000,0,0
+  REQUIRE(s.ghost().has_value());
+  CHECK(s.ghost()->valid); // Ghost is clamped inside, so it is valid!
+  CHECK(s.ghost()->worldTransform.position.x == doctest::Approx(9998.5)); // 9999.0 - 0.5 (half-width)
+
+  // Reset to default place distance
+  s.setPlaceDistance(10.0);
+  s.updateGhost(Vec3{0, 10, 0}, Vec3{0, -1, 0}); // pos = 0,0,0
+  const InstanceId id = s.commitGhost().value();
+
+  // 2. Dragging outside plot boundary should clamp the position
+  s.selectByRay(Vec3{0, 0, -10}, Vec3{0, 0, 1});
+  const double scale = 5.0;
+  REQUIRE(s.beginGizmoDrag(Vec3{2, 5, 0}, Vec3{0, -1, 0}, scale)); // Grab X axis
+  s.updateGizmoDrag(Vec3{12000, 5, 0}, Vec3{0, -1, 0}); // Drag to 12000 (outside)
+  CHECK(s.endGizmoDrag()); // commit succeeds
+  
+  // Position is clamped to 9998.5
+  CHECK(s.station().find(id)->worldTransform.position.x == doctest::Approx(9998.5));
+}
+

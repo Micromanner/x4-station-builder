@@ -60,7 +60,7 @@ void OrbitCamera::update() {
     const double k = 1.0 - static_cast<double>(wheel) * 0.1;
     const ZoomResult z =
         zoomTowardCursor(toVec3(target_), static_cast<double>(distance_), basis.forward,
-                         toVec3(r.position), toVec3(r.direction), k, 2.0, 1000000.0);
+                         toVec3(r.position), toVec3(r.direction), k, 2.0, 40000.0);
     target_ = toRl(z.target);
     distance_ = static_cast<float>(z.distance);
     rebuild();
@@ -72,7 +72,7 @@ void OrbitCamera::update() {
   // distance (so it's brisk far out and precise up close) and frame time.
   if (flying) {
     constexpr double kFlyUnitsPerDistPerSec = 1.5;
-    const double speed = static_cast<double>(distance_) * kFlyUnitsPerDistPerSec *
+    const double speed = std::max(static_cast<double>(distance_), 200.0) * kFlyUnitsPerDistPerSec *
                          static_cast<double>(GetFrameTime());
     target_ = toRl(toVec3(target_) +
                    flyOffset(basis, Vec3{0.0, 1.0, 0.0}, flyFwd, flyStrafe, flyRise, speed));
@@ -82,11 +82,17 @@ void OrbitCamera::update() {
 
 void OrbitCamera::frame(::Vector3 target, float radius) {
   target_ = target;
-  distance_ = std::max(radius * 2.5f, 5.0f);
+  distance_ = std::clamp(radius * 2.5f, 5.0f, 40000.0f);
   rebuild();
 }
 
 void OrbitCamera::rebuild() {
+  // Clamp movement target to +/- 52km (12km box margin + 40km max zoom) so that
+  // the camera position can fly anywhere within the plot even when fully zoomed out.
+  target_.x = std::clamp(target_.x, -52000.0f, 52000.0f);
+  target_.y = std::clamp(target_.y, -52000.0f, 52000.0f);
+  target_.z = std::clamp(target_.z, -52000.0f, 52000.0f);
+
   const float cp = std::cos(pitch_);
   cam_.position = ::Vector3{target_.x + distance_ * cp * std::sin(yaw_),
                             target_.y + distance_ * std::sin(pitch_),

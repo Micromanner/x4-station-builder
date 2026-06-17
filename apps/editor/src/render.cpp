@@ -153,12 +153,51 @@ struct ClipRange {
   return {std::clamp(d * 0.02, 1.5, 30.0), std::max(d * 4.0, 60000.0)};
 }
 
-// Begin the 3D scene: distance-scaled clip planes, the global (1,1,-1) handedness
-// flip, and the translucent 20km build-volume plot box. Backface culling is left
-// DISABLED here as the base state so the batched raylib primitives (plot box, LOD
-// boxes, connector spheres) — whose winding the flip inverts — render whole; the
-// mesh pass enables culling only around its own immediate draws. Pairs with
-// endScene().
+void drawDottedLine(::Vector3 start, ::Vector3 end, ::Color color) {
+  constexpr float dash = 300.0f;
+  constexpr float gap = 300.0f;
+  float dx = end.x - start.x;
+  float dy = end.y - start.y;
+  float dz = end.z - start.z;
+  float len = std::sqrt(dx * dx + dy * dy + dz * dz);
+  if (len < 1e-3f) return;
+  float ux = dx / len;
+  float uy = dy / len;
+  float uz = dz / len;
+
+  float dist = 0.0f;
+  while (dist < len) {
+    float segmentEnd = std::min(dist + dash, len);
+    ::Vector3 p1{start.x + ux * dist, start.y + uy * dist, start.z + uz * dist};
+    ::Vector3 p2{start.x + ux * segmentEnd, start.y + uy * segmentEnd, start.z + uz * segmentEnd};
+    DrawLine3D(p1, p2, color);
+    dist += dash + gap;
+  }
+}
+
+void drawPlotDottedEdges() {
+  constexpr float h = 10000.0f; // Half size
+  const ::Color edgeColor{34, 187, 255, 60}; // Faint Cherenkov blue for the dotted edges
+  
+  // 4 edges along X
+  drawDottedLine(::Vector3{-h, -h, -h}, ::Vector3{h, -h, -h}, edgeColor);
+  drawDottedLine(::Vector3{-h, -h,  h}, ::Vector3{h, -h,  h}, edgeColor);
+  drawDottedLine(::Vector3{-h,  h, -h}, ::Vector3{h,  h, -h}, edgeColor);
+  drawDottedLine(::Vector3{-h,  h,  h}, ::Vector3{h,  h,  h}, edgeColor);
+
+  // 4 edges along Y
+  drawDottedLine(::Vector3{-h, -h, -h}, ::Vector3{-h, h, -h}, edgeColor);
+  drawDottedLine(::Vector3{-h, -h,  h}, ::Vector3{-h, h,  h}, edgeColor);
+  drawDottedLine(::Vector3{ h, -h, -h}, ::Vector3{ h, h, -h}, edgeColor);
+  drawDottedLine(::Vector3{ h, -h,  h}, ::Vector3{ h, h,  h}, edgeColor);
+
+  // 4 edges along Z
+  drawDottedLine(::Vector3{-h, -h, -h}, ::Vector3{-h, -h, h}, edgeColor);
+  drawDottedLine(::Vector3{-h,  h, -h}, ::Vector3{-h,  h, h}, edgeColor);
+  drawDottedLine(::Vector3{ h, -h, -h}, ::Vector3{ h, -h, h}, edgeColor);
+  drawDottedLine(::Vector3{ h,  h, -h}, ::Vector3{ h,  h, h}, edgeColor);
+}
+
 void beginScene(const ::Camera3D& camera) {
   const ClipRange clip = sceneClip(camera);
   rlSetClipPlanes(clip.nearC, clip.farC);  // must precede BeginMode3D (builds the projection)
@@ -168,14 +207,8 @@ void beginScene(const ::Camera3D& camera) {
   rlScalef(1.0f, 1.0f, -1.0f);  // X4 left-handed -> raylib right-handed (parent §4)
   rlDisableBackfaceCulling();
 
-  // The 20x20x20 km station build volume (X4's max plot), centered on the origin.
-  // Hardcoded for now (later adjustable); purely visual, no collision. Drawn like
-  // the in-game plot: a faint translucent blue volume with brighter blue edges.
-  constexpr float kPlotSize = 20000.0f;  // 20 km in X4 units (meters)
-  const ::Vector3 plotCenter{0.0f, 0.0f, 0.0f};
-  const ::Vector3 plotExtent{kPlotSize, kPlotSize, kPlotSize};
-  DrawCubeV(plotCenter, plotExtent, ::Color{50, 120, 210, 16});
-  DrawCubeWiresV(plotCenter, plotExtent, ::Color{70, 150, 240, 220});
+  // Draw the faint dotted edges of the 20x20x20 km build volume
+  drawPlotDottedEdges();
 }
 
 void endScene() {
@@ -413,6 +446,117 @@ void drawScene(const EditorState& state, const ::Camera3D& camera, MeshCache& me
 
   drawPlacedModules(state.station(), state.catalog(), state.selected(), meshes, showGizmos,
                     showMeshes, camera, /*allConnectors=*/false, state.dragPreview());
+
+  // Draw proximity warning grids on build boundary faces when a module is near them
+  AABB worldBox{};
+  bool hasRef = false;
+  bool isRefValid = true;
+  Vec3 centerPos{};
+
+  if (state.ghost()) {
+    const ModuleDef* def = state.defFor(state.ghost()->defId);
+    if (def) {
+      worldBox = worldAabb(def->aabb, state.ghost()->worldTransform);
+      centerPos = (worldBox.min + worldBox.max) * 0.5;
+      hasRef = true;
+      isRefValid = state.ghost()->valid;
+    }
+  } else if (state.dragging() && state.dragPreview()) {
+    if (state.selected()) {
+      const PlacedModule* pm = state.station().find(*state.selected());
+      const ModuleDef* def = pm ? state.catalog().find(pm->defId) : nullptr;
+      if (def) {
+        worldBox = worldAabb(def->aabb, *state.dragPreview());
+        centerPos = (worldBox.min + worldBox.max) * 0.5;
+        hasRef = true;
+        constexpr double kPlotLimit = 10000.0;
+        isRefValid = worldBox.min.x >= -kPlotLimit && worldBox.max.x <= kPlotLimit &&
+                     worldBox.min.y >= -kPlotLimit && worldBox.max.y <= kPlotLimit &&
+                     worldBox.min.z >= -kPlotLimit && worldBox.max.z <= kPlotLimit;
+      }
+    }
+  }
+
+  if (hasRef && isRefValid) {
+    auto drawFaceGrid = [](int axis, double value, double uVal, double vVal, ::Color gridColor) {
+      constexpr double gridHalfSize = 1500.0;
+      constexpr int steps = 6;
+      const double stepSize = (gridHalfSize * 2.0) / steps;
+
+      auto drawClippedLine = [](Vec3 p1, Vec3 p2, ::Color color) {
+        constexpr double L = 10000.0;
+        // Check if completely outside
+        if ((p1.x > L && p2.x > L) || (p1.x < -L && p2.x < -L)) return;
+        if ((p1.y > L && p2.y > L) || (p1.y < -L && p2.y < -L)) return;
+        if ((p1.z > L && p2.z > L) || (p1.z < -L && p2.z < -L)) return;
+
+        // Clamp endpoints to the plot boundary box
+        p1.x = std::clamp(p1.x, -L, L);
+        p1.y = std::clamp(p1.y, -L, L);
+        p1.z = std::clamp(p1.z, -L, L);
+
+        p2.x = std::clamp(p2.x, -L, L);
+        p2.y = std::clamp(p2.y, -L, L);
+        p2.z = std::clamp(p2.z, -L, L);
+
+        DrawLine3D(toRl(p1), toRl(p2), color);
+      };
+
+      for (int i = 0; i <= steps; ++i) {
+        double offset = -gridHalfSize + i * stepSize;
+        Vec3 p1{}, p2{}, q1{}, q2{};
+
+        if (axis == 0) { // X plane
+          p1 = {value, uVal + offset, vVal - gridHalfSize};
+          p2 = {value, uVal + offset, vVal + gridHalfSize};
+          q1 = {value, uVal - gridHalfSize, vVal + offset};
+          q2 = {value, uVal + gridHalfSize, vVal + offset};
+        } else if (axis == 1) { // Y plane
+          p1 = {uVal + offset, value, vVal - gridHalfSize};
+          p2 = {uVal + offset, value, vVal + gridHalfSize};
+          q1 = {uVal - gridHalfSize, value, vVal + offset};
+          q2 = {uVal + gridHalfSize, value, vVal + offset};
+        } else { // Z plane
+          p1 = {uVal + offset, vVal - gridHalfSize, value};
+          p2 = {uVal + offset, vVal + gridHalfSize, value};
+          q1 = {uVal - gridHalfSize, vVal + offset, value};
+          q2 = {uVal + gridHalfSize, vVal + offset, value};
+        }
+
+        drawClippedLine(p1, p2, gridColor);
+        drawClippedLine(q1, q2, gridColor);
+      }
+    };
+
+    constexpr double kPlotLimit = 10000.0;
+    constexpr double kThresh = 250.0;
+    const ::Color normalColor{34, 187, 255, 180}; // Cherenkov Blue
+    const ::Color gridColor = normalColor;
+
+    // Check proximity to X planes (+/- 10000) using AABB bounds
+    if (std::abs(worldBox.max.x - kPlotLimit) < kThresh) {
+      drawFaceGrid(0, kPlotLimit, centerPos.y, centerPos.z, gridColor);
+    }
+    if (std::abs(worldBox.min.x + kPlotLimit) < kThresh) {
+      drawFaceGrid(0, -kPlotLimit, centerPos.y, centerPos.z, gridColor);
+    }
+
+    // Check proximity to Y planes (+/- 10000) using AABB bounds
+    if (std::abs(worldBox.max.y - kPlotLimit) < kThresh) {
+      drawFaceGrid(1, kPlotLimit, centerPos.x, centerPos.z, gridColor);
+    }
+    if (std::abs(worldBox.min.y + kPlotLimit) < kThresh) {
+      drawFaceGrid(1, -kPlotLimit, centerPos.x, centerPos.z, gridColor);
+    }
+
+    // Check proximity to Z planes (+/- 10000) using AABB bounds
+    if (std::abs(worldBox.max.z - kPlotLimit) < kThresh) {
+      drawFaceGrid(2, kPlotLimit, centerPos.x, centerPos.y, gridColor);
+    }
+    if (std::abs(worldBox.min.z + kPlotLimit) < kThresh) {
+      drawFaceGrid(2, -kPlotLimit, centerPos.x, centerPos.y, gridColor);
+    }
+  }
 
   if (state.ghost()) {
     const ModuleDef* gdef = state.defFor(state.ghost()->defId);

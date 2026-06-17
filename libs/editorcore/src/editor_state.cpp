@@ -12,6 +12,32 @@ namespace x4sb {
 namespace {
 // pi/2: the 90-degree step shared by the rotate-in-place commands and the ghost.
 constexpr double kHalfPi = 1.5707963267948966;
+
+bool isInsidePlot(const AABB& box) {
+  constexpr double kPlotLimit = 10000.0;  // 20km plot centered at origin => +/-10km
+  return box.min.x >= -kPlotLimit && box.max.x <= kPlotLimit &&
+         box.min.y >= -kPlotLimit && box.max.y <= kPlotLimit &&
+         box.min.z >= -kPlotLimit && box.max.z <= kPlotLimit;
+}
+
+Transform clampToPlot(const AABB& localAabb, Transform t) {
+  constexpr double L = 9999.0;  // 1m buffer inside the 10000.0 boundary
+  AABB rotated = worldAabb(localAabb, Transform{Vec3{0, 0, 0}, t.rotation});
+
+  double minX = -L - rotated.min.x;
+  double maxX = L - rotated.max.x;
+  if (maxX >= minX) t.position.x = std::clamp(t.position.x, minX, maxX);
+
+  double minY = -L - rotated.min.y;
+  double maxY = L - rotated.max.y;
+  if (maxY >= minY) t.position.y = std::clamp(t.position.y, minY, maxY);
+
+  double minZ = -L - rotated.min.z;
+  double maxZ = L - rotated.max.z;
+  if (maxZ >= minZ) t.position.z = std::clamp(t.position.z, minZ, maxZ);
+
+  return t;
+}
 }  // namespace
 
 EditorState::EditorState(const ModuleCatalog& catalog) : catalog_(catalog) {
@@ -81,10 +107,8 @@ void EditorState::updateGhost(Vec3 rayOriginX4, Vec3 rayDirX4, bool forceFree) {
           if (cand) {
             const Transform xf = computeSnapTransform(station_, catalog_, cand->instanceId,
                                                       cand->targetPointId, *def, cand->newPointId);
-            // No collision gating in the box-proxy phase (boxes >> meshes; correct
-            // joints overlap). A snap is valid whenever a free compatible connector
-            // is found. Revisit with OBB/real-mesh collision (spec §6).
-            ghost_ = Ghost{def->id, xf, /*valid=*/true, cand};
+            const AABB snapWorldBox = worldAabb(def->aabb, xf);
+            ghost_ = Ghost{def->id, xf, isInsidePlot(snapWorldBox), cand};
             return;
           }
         }
@@ -100,7 +124,9 @@ void EditorState::updateGhost(Vec3 rayOriginX4, Vec3 rayDirX4, bool forceFree) {
   Transform xf;
   xf.position = rayOriginX4 + rayDirX4 * placeDistance_;
   xf.rotation = pendingRotation_;
-  ghost_ = Ghost{def->id, xf, /*valid=*/true, std::nullopt};
+  xf = clampToPlot(def->aabb, xf);
+  const AABB worldBox = worldAabb(def->aabb, xf);
+  ghost_ = Ghost{def->id, xf, isInsidePlot(worldBox), std::nullopt};
 }
 
 void EditorState::rotateGhost(Vec3 worldAxis) {
@@ -187,6 +213,7 @@ void EditorState::updateGizmoDrag(Vec3 rayOriginX4, Vec3 rayDirX4, bool forceFre
                                            rayDirX4);
     Transform rotated = drag_->startTransform;
     rotated.rotation = axisAngle(gizmoAxisDir(drag_->handle), angle) * drag_->startTransform.rotation;
+    rotated = clampToPlot(def->aabb, rotated);
     drag_->snap.reset();
     drag_->preview = rotated;
     return;
@@ -197,6 +224,7 @@ void EditorState::updateGizmoDrag(Vec3 rayOriginX4, Vec3 rayDirX4, bool forceFre
                                     rayDirX4);
   Transform freePose = drag_->startTransform;
   freePose.position = drag_->startTransform.position + delta;
+  freePose = clampToPlot(def->aabb, freePose);
   drag_->snap.reset();
   drag_->preview = freePose;
 
@@ -215,6 +243,16 @@ bool EditorState::endGizmoDrag() {
   if (!drag_) return false;
   const GizmoDrag d = *drag_;
   drag_.reset();
+
+  // Validate boundary box before committing the drag
+  const PlacedModule* pm = station_.find(d.id);
+  const ModuleDef* def = pm ? catalog_.find(pm->defId) : nullptr;
+  if (def) {
+    if (!isInsidePlot(worldAabb(def->aabb, d.preview))) {
+      return false;
+    }
+  }
+
   if (d.snap) {
     undo_.execute(station_, std::make_unique<SnapMoveCommand>(
                                 d.id, d.preview, d.snap->instanceId, d.snap->newPointId,
@@ -244,6 +282,10 @@ bool EditorState::rotateSelected(Vec3 worldAxis) {
   if (m == nullptr) return false;
   Transform t = m->worldTransform;
   t.rotation = axisAngle(worldAxis, kHalfPi) * t.rotation;
+  const ModuleDef* def = catalog_.find(m->defId);
+  if (def) {
+    t = clampToPlot(def->aabb, t);
+  }
   undo_.execute(station_, std::make_unique<MoveModuleCommand>(*selected_, t));
   return true;
 }
