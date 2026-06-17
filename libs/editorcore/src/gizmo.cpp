@@ -67,7 +67,21 @@ void planeBasis(GizmoHandle h, Vec3& u, Vec3& v) {
   }
 }
 
-
+std::optional<double> raySphereT(Vec3 o, Vec3 d, Vec3 center, double radius) {
+  const Vec3 oc = o - center;
+  const double a = dot(d, d);
+  const double b = 2.0 * dot(oc, d);
+  const double c = dot(oc, oc) - radius * radius;
+  const double discriminant = b * b - 4.0 * a * c;
+  if (discriminant < 0.0) return std::nullopt;
+  const double t = (-b - std::sqrt(discriminant)) / (2.0 * a);
+  if (t < 0.0) {
+    const double t2 = (-b + std::sqrt(discriminant)) / (2.0 * a);
+    if (t2 >= 0.0) return 0.0;
+    return std::nullopt;
+  }
+  return t;
+}
 
 }  // namespace
 
@@ -78,6 +92,7 @@ GizmoModel gizmoModel(Vec3 origin, double scale) {
   g.planeSize = 0.3 * scale;
   g.axisPickRadius = 0.08 * scale;
   g.ringRadius = scale;  // rings circumscribe the arrow tips
+  g.centerPickRadius = 0.15 * scale;
   return g;
 }
 
@@ -135,6 +150,13 @@ std::optional<GizmoHandle> gizmoPick(const GizmoModel& g, Vec3 rayOrigin, Vec3 r
   std::optional<GizmoHandle> best;
   double bestT = std::numeric_limits<double>::infinity();
 
+  // Center handle check
+  const std::optional<double> tCenter = raySphereT(rayOrigin, rayDir, g.origin, g.centerPickRadius);
+  if (tCenter && *tCenter < bestT) {
+    bestT = *tCenter;
+    best = GizmoHandle::Center;
+  }
+
   // Plane handles first (priority): pick the nearest plane quad the ray enters.
   const std::array<GizmoHandle, 3> planes{GizmoHandle::PlaneXY, GizmoHandle::PlaneYZ,
                                           GizmoHandle::PlaneZX};
@@ -184,6 +206,13 @@ std::optional<GizmoHandle> gizmoPick(const GizmoModel& g, Vec3 rayOrigin, Vec3 r
 
 Vec3 gizmoDragDelta(GizmoHandle handle, Vec3 origin, Vec3 startRayOrigin, Vec3 startRayDir,
                     Vec3 curRayOrigin, Vec3 curRayDir) {
+  if (handle == GizmoHandle::Center) {
+    const Vec3 n = startRayDir;
+    const std::optional<double> tCur = rayPlaneT(curRayOrigin, curRayDir, origin, n);
+    if (!tCur) return {0, 0, 0};
+    const Vec3 hitCur = curRayOrigin + curRayDir * (*tCur);
+    return hitCur - origin;
+  }
   if (gizmoIsAxis(handle)) {
     const Vec3 axis = gizmoAxisDir(handle);
     // Project the mouse ray onto a camera-facing plane containing the drag axis.

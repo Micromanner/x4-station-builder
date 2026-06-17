@@ -31,7 +31,8 @@ struct SnapCandidate {
 // dragged module is never matched against its own connectors.
 std::optional<SnapCandidate> findSnapCandidate(const ModuleDef& newDef, Vec3 cursorWorldPos,
                                                const Station& station, const ModuleCatalog& catalog,
-                                               double radius, InstanceId ignoreInstanceId = 0);
+                                               double radius, InstanceId ignoreInstanceId = 0,
+                                               std::optional<Transform> newDefTransform = std::nullopt);
 
 // AABB overlap test of a candidate placement against all OTHER placed modules
 // (the joint itself cannot overlap). `ignoreInstanceId` is skipped.

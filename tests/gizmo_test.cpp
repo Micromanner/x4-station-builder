@@ -87,3 +87,36 @@ TEST_CASE("gizmoDragRotation: signed angle swept about the ring axis") {
                                      Vec3{0, -1, 0}, Vec3{0, 5, 1}, Vec3{0, -1, 0});
   CHECK(a == doctest::Approx(-1.5707963267948966).epsilon(1e-9));
 }
+
+TEST_CASE("gizmoPick: a ray into the center sphere selects the Center handle") {
+  const GizmoModel g = gizmoModel(Vec3{0, 0, 0}, 1.0); // centerPickRadius 0.15
+  // A ray passing through the origin (0, 0, 0)
+  const auto h = gizmoPick(g, Vec3{0, 0, 10}, Vec3{0, 0, -1});
+  REQUIRE(h.has_value());
+  CHECK(*h == GizmoHandle::Center);
+
+  // A ray close enough to the origin but missing planes (planes extend outward from origin, e.g. pu, pv in [0, 0.3])
+  // A ray at x=0.05, y=0.05, z=10 pointing straight down in -z: it lands at (0.05, 0.05, 0)
+  // Distance from origin is sqrt(0.05^2 + 0.05^2) = 0.0707 <= 0.15 (centerPickRadius)
+  // But is it within planes? The PlaneXY quad spans x[0, 0.3] and y[0, 0.3].
+  // Center sphere is in front of the XY plane (intersection at z = 0.15 * scale - ...).
+  // So the sphere hit distance tCenter should be smaller than tPlane, selecting Center!
+  const auto h2 = gizmoPick(g, Vec3{0.05, 0.05, 10}, Vec3{0, 0, -1});
+  REQUIRE(h2.has_value());
+  CHECK(*h2 == GizmoHandle::Center);
+}
+
+TEST_CASE("gizmoDragDelta: Center handle drags along screen plane") {
+  // Center drag from start ray at z=10 pointing to -z (hits origin at 0,0,0)
+  // Current ray starts at (1, 1, 10) pointing straight down in -z (direction {0,0,-1})
+  // View normal (startRayDir) is {0, 0, -1}.
+  // Intersecting current ray with view plane (passing through 0,0,0 with normal {0,0,-1})
+  // Current ray hits at (1, 1, 0).
+  // Delta should be (1, 1, 0) - (0, 0, 0) = (1, 1, 0).
+  const Vec3 delta = gizmoDragDelta(GizmoHandle::Center, Vec3{0, 0, 0}, Vec3{0, 0, 10},
+                                    Vec3{0, 0, -1}, Vec3{1, 1, 10}, Vec3{0, 0, -1});
+  CHECK(delta.x == doctest::Approx(1.0));
+  CHECK(delta.y == doctest::Approx(1.0));
+  CHECK(delta.z == doctest::Approx(0.0));
+}
+

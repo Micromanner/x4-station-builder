@@ -9,7 +9,7 @@
 
 namespace x4sb {
 
-enum class GizmoHandle { AxisX, AxisY, AxisZ, PlaneXY, PlaneYZ, PlaneZX, RotX, RotY, RotZ };
+enum class GizmoHandle { AxisX, AxisY, AxisZ, PlaneXY, PlaneYZ, PlaneZX, RotX, RotY, RotZ, Center };
 
 // Handle extents in world units. `scale` is the world length the renderer wants
 // the axis handles to span at the module's current camera distance (constant
@@ -20,6 +20,7 @@ struct GizmoModel {
   double planeSize{0.3};        // square plane-quad side, from the origin
   double axisPickRadius{0.08};  // ray-to-axis distance threshold; also the ring band
   double ringRadius{1.0};       // rotation-ring radius (circumscribes the arrows)
+  double centerPickRadius{0.15}; // sphere radius at the origin
 };
 
 [[nodiscard]] GizmoModel gizmoModel(Vec3 origin, double scale);

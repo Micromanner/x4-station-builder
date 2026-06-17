@@ -62,7 +62,8 @@ Transform computeSnapTransform(const Station& station, const ModuleCatalog& cata
 
 std::optional<SnapCandidate> findSnapCandidate(const ModuleDef& newDef, Vec3 cursorWorldPos,
                                                const Station& station, const ModuleCatalog& catalog,
-                                               double radius, InstanceId ignoreInstanceId) {
+                                               double radius, InstanceId ignoreInstanceId,
+                                               std::optional<Transform> newDefTransform) {
   std::optional<SnapCandidate> best;
   double bestDist = radius;
 
@@ -73,13 +74,28 @@ std::optional<SnapCandidate> findSnapCandidate(const ModuleDef& newDef, Vec3 cur
     for (const auto& cp : def->connectionPoints) {
       if (pointIsLinked(placed, cp.id)) continue;
       const Vec3 world = apply(placed.worldTransform, cp.localPosition);
-      const double dist = length(world - cursorWorldPos);
-      if (dist > bestDist) continue;
-      for (const auto& np : newDef.connectionPoints) {
-        if (!compatible(cp, np)) continue;
-        bestDist = dist;
-        best = SnapCandidate{placed.instanceId, cp.id, np.id};
-        break;
+
+      if (newDefTransform) {
+        // Connector-to-connector distance comparison for dragging/snap-on-move
+        for (const auto& np : newDef.connectionPoints) {
+          if (!compatible(cp, np)) continue;
+          const Vec3 newWorld = apply(*newDefTransform, np.localPosition);
+          const double dist = length(world - newWorld);
+          if (dist < bestDist) {
+            bestDist = dist;
+            best = SnapCandidate{placed.instanceId, cp.id, np.id};
+          }
+        }
+      } else {
+        // Traditional cursor-based distance comparison
+        const double dist = length(world - cursorWorldPos);
+        if (dist > bestDist) continue;
+        for (const auto& np : newDef.connectionPoints) {
+          if (!compatible(cp, np)) continue;
+          bestDist = dist;
+          best = SnapCandidate{placed.instanceId, cp.id, np.id};
+          break;
+        }
       }
     }
   }

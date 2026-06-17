@@ -230,7 +230,7 @@ void EditorState::updateGizmoDrag(Vec3 rayOriginX4, Vec3 rayDirX4, bool forceFre
 
   if (!forceFree) {
     const std::optional<SnapCandidate> cand = findSnapCandidate(
-        *def, freePose.position, station_, catalog_, dragSnapRadius_, drag_->id);
+        *def, freePose.position, station_, catalog_, dragSnapRadius_, drag_->id, freePose);
     if (cand) {
       drag_->snap = cand;
       drag_->preview = computeSnapTransform(station_, catalog_, cand->instanceId,

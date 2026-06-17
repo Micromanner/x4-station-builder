@@ -358,3 +358,35 @@ TEST_CASE("integration: snap-place then pick then move detaches and undo reattac
   CHECK(station.find(idA)->links.size() == 1);
   CHECK(station.find(idB)->worldTransform.position.x == doctest::Approx(-1));
 }
+
+TEST_CASE("findSnapCandidate uses connector-to-connector distance when newDefTransform is provided") {
+  ModuleCatalog catalog;
+  catalog.add(makeModule("A", "a1", {0.5, 0, 0}));
+  const ModuleDef newDef = makeModule("B", "b1", {-0.5, 0, 0});
+
+  Station station;
+  PlacedModule pa;
+  pa.defId = "A";
+  pa.worldTransform.position = {0, 0, 0};  // connector a1 at {0.5, 0, 0}
+  const InstanceId ida = station.add(pa);
+
+  // Dragging B with a preview transform at {2, 0, 0}.
+  // The moving connector b1 is at {1.5, 0, 0}.
+  // Distance between connector a1 (0.5) and b1 (1.5) is 1.0.
+  Transform freePose;
+  freePose.position = {2, 0, 0};
+
+  // If using old cursor distance (from freePose.position {2,0,0}), distance to a1 (0.5) is 1.5.
+  // With a small radius of 1.2:
+  // Using cursor (no newDefTransform): should miss because 1.5 > 1.2
+  const auto miss = findSnapCandidate(newDef, freePose.position, station, catalog, 1.2, ida + 1);
+  CHECK_FALSE(miss.has_value());
+
+  // Using newDefTransform: should hit because connector distance is 1.0 <= 1.2
+  const auto hit = findSnapCandidate(newDef, freePose.position, station, catalog, 1.2, ida + 1, freePose);
+  REQUIRE(hit.has_value());
+  CHECK(hit->instanceId == ida);
+  CHECK(hit->targetPointId == "a1");
+  CHECK(hit->newPointId == "b1");
+}
+

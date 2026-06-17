@@ -107,13 +107,45 @@ bool drawModuleMeshes(const ModuleDef& def, const Transform& xf, MeshCache& mesh
 
 // `xf` is the pose to draw at — normally pm.worldTransform, but the live drag
 // preview pose for the module being dragged, so its markers track the mesh.
-void drawConnectors(const ModuleDef& def, const PlacedModule& pm, const Transform& xf) {
+// `xf` is the pose to draw at — normally pm.worldTransform, but the live drag
+// preview pose for the module being dragged, so its markers track the mesh.
+void drawConnectors(const ModuleDef& def, const PlacedModule& pm, const Transform& xf,
+                    std::optional<AABB> activeAabb = std::nullopt,
+                    std::optional<InstanceId> selected = std::nullopt) {
   for (const auto& cp : def.connectionPoints) {
     const Vec3 world = apply(xf, cp.localPosition);
     const bool linked = pointIsLinked(pm, cp.id);
-    // Orange (free) / gray (occupied) so markers read distinctly from the blue
-    // orientation-gizmo axis/tip.
-    const ::Color c = linked ? GRAY : ORANGE;
+    const bool isSelected = selected.has_value() && *selected == pm.instanceId;
+
+    // Determine the opacity/brightness of this connector
+    bool lit = isSelected;
+    if (!lit && activeAabb) {
+      // Calculate distance between world point and activeAabb
+      const Vec3 q{
+          std::clamp(world.x, activeAabb->min.x, activeAabb->max.x),
+          std::clamp(world.y, activeAabb->min.y, activeAabb->max.y),
+          std::clamp(world.z, activeAabb->min.z, activeAabb->max.z)
+      };
+      const double dist = length(world - q);
+      // Lights up if it is within 1000.0 units of the active AABB
+      if (dist < 1000.0) {
+        lit = true;
+      }
+    } else if (!activeAabb) {
+      // Default to fully lit if no active ghost/selection context is provided
+      // (e.g. in snap tests or when not in snapping context).
+      lit = true;
+    }
+
+    ::Color c;
+    if (linked) {
+      // Occupied connectors: dark gray, slightly brighter if lit (or always dim)
+      c = lit ? ::Color{120, 120, 120, 100} : ::Color{120, 120, 120, 50};
+    } else {
+      // Free connectors: bright orange if lit, barely visible transparent orange if not
+      c = lit ? ORANGE : ::Color{255, 161, 0, 90};
+    }
+
     DrawSphere(toRl(world), 20.0f, c);  // X4 scale: ~0.6 was sub-pixel
     // Draw the connector's local +Z as its facing normal. This MUST stay the
     // same axis the snap solver mates about (snap.cpp `kMate`, spec §3.1); if
@@ -313,7 +345,8 @@ constexpr float kMeshPx = 12.0f;
 void drawPlacedModules(const Station& station, const ModuleCatalog& catalog,
                        std::optional<InstanceId> selected, MeshCache& meshes, bool showGizmos,
                        bool showMeshes, const ::Camera3D& camera, bool allConnectors,
-                       std::optional<Transform> selectedPreview) {
+                       std::optional<Transform> selectedPreview,
+                       std::optional<AABB> activeAabb = std::nullopt) {
   const double projF = projFactor(camera);
   const ViewCull vc = viewCull(camera);
 
@@ -384,17 +417,18 @@ void drawPlacedModules(const Station& station, const ModuleCatalog& catalog,
   }
 
   // Pass 3: detail markers. Interactive editor shows them for the SELECTED module
-  // only (the forest of every-module connectors was the bulk of big-station
-  // clutter + cost); the snap-eyeball harness opts into all of them.
+  // only, unless activeAabb is present (meaning a ghost or selection is active,
+  // where we show all connectors dim, lighting up when close), or allConnectors is true.
   {
     ZoneScopedN("modules: markers");
+    const bool showAllDim = allConnectors || activeAabb.has_value();
     for (const auto& pm : station.modules()) {
       const bool sel = selected.has_value() && *selected == pm.instanceId;
-      if (!allConnectors && !sel) continue;
+      if (!showAllDim && !sel) continue;
       const ModuleDef* def = catalog.find(pm.defId);
       if (def == nullptr) continue;
-      drawConnectors(*def, pm, xfFor(pm, sel));
-      if (showGizmos) drawAxisGizmo(*def, xfFor(pm, sel));
+      drawConnectors(*def, pm, xfFor(pm, sel), activeAabb, selected);
+      if (showGizmos && (sel || allConnectors)) drawAxisGizmo(*def, xfFor(pm, sel));
     }
   }
 }
@@ -444,8 +478,23 @@ void drawScene(const EditorState& state, const ::Camera3D& camera, MeshCache& me
   ZoneScoped;
   beginScene(camera);
 
+  std::optional<AABB> activeAabb;
+  if (state.ghost()) {
+    const ModuleDef* gdef = state.defFor(state.ghost()->defId);
+    if (gdef) {
+      activeAabb = worldAabb(gdef->aabb, state.ghost()->worldTransform);
+    }
+  } else if (state.selected()) {
+    const PlacedModule* pm = state.station().find(*state.selected());
+    const ModuleDef* sdef = pm ? state.catalog().find(pm->defId) : nullptr;
+    if (sdef) {
+      Transform xf = state.dragPreview() ? *state.dragPreview() : pm->worldTransform;
+      activeAabb = worldAabb(sdef->aabb, xf);
+    }
+  }
+
   drawPlacedModules(state.station(), state.catalog(), state.selected(), meshes, showGizmos,
-                    showMeshes, camera, /*allConnectors=*/false, state.dragPreview());
+                    showMeshes, camera, /*allConnectors=*/false, state.dragPreview(), activeAabb);
 
   // Draw proximity warning grids on build boundary faces when a module is near them
   AABB worldBox{};
@@ -667,6 +716,10 @@ void drawTranslateGizmo(const EditorState& state, const ::Camera3D& camera) {
     const ::Color col = (hl && *hl == rv.handle) ? kHi : rv.color;
     DrawCircle3D(o, static_cast<float>(g.ringRadius), rv.tiltAxis, rv.tiltDeg, col);
   }
+
+  // Center free-translate handle: a small white sphere at the origin
+  const ::Color centerCol = (hl && *hl == GizmoHandle::Center) ? kHi : WHITE;
+  DrawSphere(o, static_cast<float>(g.centerPickRadius), centerCol);
 
   // The selected module's real mesh now tracks the drag preview pose live (see
   // drawPlacedModules' selectedPreview), so no AABB-box ghost is drawn here — the

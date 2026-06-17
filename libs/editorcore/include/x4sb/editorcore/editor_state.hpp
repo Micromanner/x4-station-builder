@@ -152,7 +152,7 @@ class EditorState {
   // snapRadius is in X4 world units: modules span up to ~1500 and connectors sit
   // at the module extents, so the nearest free connector to a ray's box-surface
   // hit point can be ~1000+ away — 50 was far too small to ever snap.
-  double snapRadius_{2000.0};
+  double snapRadius_{1000.0};
   // View-facing standoff for free placement (see setPlaceDistance). The shell
   // overrides this with the camera orbit distance; 10.0 is the headless default.
   double placeDistance_{10.0};

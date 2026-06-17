@@ -86,6 +86,7 @@ double gizmoScaleFor(const ::Camera3D& camera, const EditorState& state) {
 
 void handleMouse(EditorState& state, const ::Camera3D& camera) {
   const bool alt = IsKeyDown(KEY_LEFT_ALT) || IsKeyDown(KEY_RIGHT_ALT);
+  const bool shift = IsKeyDown(KEY_LEFT_SHIFT) || IsKeyDown(KEY_RIGHT_SHIFT);
   Vec3 ro{};
   Vec3 rd{};
   mouseRayX4(camera, ro, rd);
@@ -97,7 +98,7 @@ void handleMouse(EditorState& state, const ::Camera3D& camera) {
   state.setPlaceDistance(orbit > 1.0F ? static_cast<double>(orbit) : 1.0);
 
   // Ghost preview only when not dragging (a drag owns the selection's pose).
-  if (!state.dragging()) state.updateGhost(ro, rd, alt);
+  if (!state.dragging()) state.updateGhost(ro, rd, alt || shift);
 
   // One scale read per frame (camera + selection are fixed here), shared by the
   // hover highlight and the grab hit-test — each call does an O(n) Station::find.
@@ -113,7 +114,7 @@ void handleMouse(EditorState& state, const ::Camera3D& camera) {
     }
   }
   if (IsMouseButtonDown(MOUSE_BUTTON_LEFT) && state.dragging()) {
-    state.updateGizmoDrag(ro, rd, alt);
+    state.updateGizmoDrag(ro, rd, alt || shift);
   }
   if (IsMouseButtonReleased(MOUSE_BUTTON_LEFT) && state.dragging()) {
     state.endGizmoDrag();
