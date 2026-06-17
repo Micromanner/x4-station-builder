@@ -9,6 +9,10 @@
 #include <memory>
 
 namespace x4sb {
+namespace {
+// pi/2: the 90-degree step shared by the rotate-in-place commands and the ghost.
+constexpr double kHalfPi = 1.5707963267948966;
+}  // namespace
 
 EditorState::EditorState(const ModuleCatalog& catalog) : catalog_(catalog) {
   order_.reserve(catalog.all().size());
@@ -100,7 +104,6 @@ void EditorState::updateGhost(Vec3 rayOriginX4, Vec3 rayDirX4, bool forceFree) {
 }
 
 void EditorState::rotateGhost(Vec3 worldAxis) {
-  constexpr double kHalfPi = 1.5707963267948966;  // 90deg
   pendingRotation_ = axisAngle(worldAxis, kHalfPi) * pendingRotation_;
 }
 
@@ -239,7 +242,6 @@ bool EditorState::rotateSelected(Vec3 worldAxis) {
   if (!selected_) return false;
   const PlacedModule* m = station_.find(*selected_);
   if (m == nullptr) return false;
-  constexpr double kHalfPi = 1.5707963267948966;
   Transform t = m->worldTransform;
   t.rotation = axisAngle(worldAxis, kHalfPi) * t.rotation;
   undo_.execute(station_, std::make_unique<MoveModuleCommand>(*selected_, t));

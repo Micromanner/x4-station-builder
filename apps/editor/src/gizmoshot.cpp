@@ -3,6 +3,7 @@
 #include "app_paths.hpp"
 #include "input.hpp"  // gizmoScaleFor
 #include "mesh_cache.hpp"
+#include "raylib_convert.hpp"  // toRl
 #include "render.hpp"
 
 #include "x4sb/data/catalog.hpp"
@@ -110,9 +111,7 @@ int runGizmoShot(const std::string& outPrefix) {
     // display space (negate the X4 center's Z).
     const StationBounds b = stationBounds(state.station(), state.catalog());
     const double r = b.radius > 1.0 ? b.radius : 1.0;
-    const Vec3 dc = flipZ(b.center);
-    const ::Vector3 target{static_cast<float>(dc.x), static_cast<float>(dc.y),
-                           static_cast<float>(dc.z)};
+    const ::Vector3 target = toRl(flipZ(b.center));
     const double dist = r * 2.5;
     const double pitch = 0.45;  // ~26 deg elevation
     const double yaw = 0.6;

@@ -190,7 +190,7 @@ TEST_CASE("select by ray, delete, and undo restores the module") {
   CHECK_FALSE(s.deleteSelected());  // nothing selected now -> no-op
 }
 
-TEST_CASE("free-place fallback: non-empty station, ray misses modules -> ground ghost") {
+TEST_CASE("free-place fallback: non-empty station, ray misses modules -> standoff ghost") {
   const ModuleCatalog c = twoModuleCatalog();
   EditorState s(c);  // active = a_mod
   // Root-place a_mod at origin.
@@ -198,7 +198,7 @@ TEST_CASE("free-place fallback: non-empty station, ray misses modules -> ground 
   REQUIRE(s.commitGhost().has_value());
 
   s.cycleActive(1);  // b_mod
-  // Down-ray far from the placed module -> no snap target -> free ghost on ground.
+  // Down-ray far from the placed module -> no snap target -> free ghost at the standoff.
   s.updateGhost(Vec3{50, 10, 50}, Vec3{0, -1, 0});
   REQUIRE(s.ghost().has_value());
   CHECK(s.ghost()->valid);

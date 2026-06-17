@@ -1,5 +1,7 @@
 #include "input.hpp"
 
+#include "raylib_convert.hpp"  // toRl
+
 #include "x4sb/editorcore/display_flip.hpp"
 
 #include "raymath.h"  // Vector3Distance
@@ -70,9 +72,7 @@ double gizmoScaleFor(const ::Camera3D& camera, const EditorState& state) {
   if (!state.selected()) return kDefault;
   const PlacedModule* m = state.station().find(*state.selected());
   if (m == nullptr) return kDefault;
-  const Vec3 disp = flipZ(m->worldTransform.position);  // display space
-  const ::Vector3 mp{static_cast<float>(disp.x), static_cast<float>(disp.y),
-                     static_cast<float>(disp.z)};
+  const ::Vector3 mp = toRl(flipZ(m->worldTransform.position));  // display space
   const double dist = static_cast<double>(Vector3Distance(camera.position, mp));
   // Track the module's size (clamped to a screen-relative min/max) so the gizmo
   // looks anchored to the module rather than growing on zoom-out. The clamp math
@@ -98,12 +98,14 @@ void handleMouse(EditorState& state, const ::Camera3D& camera) {
   // Ghost preview only when not dragging (a drag owns the selection's pose).
   if (!state.dragging()) state.updateGhost(ro, rd, alt);
 
-  // Highlight the gizmo handle under the cursor (same scale the grab uses).
-  state.updateGizmoHover(ro, rd, gizmoScaleFor(camera, state));
+  // One scale read per frame (camera + selection are fixed here), shared by the
+  // hover highlight and the grab hit-test — each call does an O(n) Station::find.
+  const double scale = gizmoScaleFor(camera, state);
+  state.updateGizmoHover(ro, rd, scale);
 
   if (IsMouseButtonPressed(MOUSE_BUTTON_LEFT)) {
     // A gizmo grab takes priority over commit/select.
-    if (!state.beginGizmoDrag(ro, rd, gizmoScaleFor(camera, state))) {
+    if (!state.beginGizmoDrag(ro, rd, scale)) {
       const bool placed = state.ghost().has_value() && state.ghost()->valid &&
                           state.commitGhost().has_value();
       if (!placed) state.selectByRay(ro, rd);
