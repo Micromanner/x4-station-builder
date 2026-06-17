@@ -7,6 +7,7 @@ add_executable(x4sb_tests
   pick_test.cpp
   display_flip_test.cpp
   editorcore_test.cpp
+  gizmo_test.cpp
   archive_test.cpp
   assetpipe_test.cpp
   xmf_test.cpp

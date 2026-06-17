@@ -62,11 +62,12 @@ Transform computeSnapTransform(const Station& station, const ModuleCatalog& cata
 
 std::optional<SnapCandidate> findSnapCandidate(const ModuleDef& newDef, Vec3 cursorWorldPos,
                                                const Station& station, const ModuleCatalog& catalog,
-                                               double radius) {
+                                               double radius, InstanceId ignoreInstanceId) {
   std::optional<SnapCandidate> best;
   double bestDist = radius;
 
   for (const auto& placed : station.modules()) {
+    if (placed.instanceId == ignoreInstanceId) continue;  // snap-on-move: skip the dragged module
     const ModuleDef* def = catalog.find(placed.defId);
     if (!def) continue;
     for (const auto& cp : def->connectionPoints) {

@@ -27,9 +27,11 @@ struct SnapCandidate {
 };
 
 // Nearest free, compatible connection point within `radius`, or nullopt.
+// `ignoreInstanceId` (default 0 = none) is skipped — used by snap-on-move so the
+// dragged module is never matched against its own connectors.
 std::optional<SnapCandidate> findSnapCandidate(const ModuleDef& newDef, Vec3 cursorWorldPos,
                                                const Station& station, const ModuleCatalog& catalog,
-                                               double radius);
+                                               double radius, InstanceId ignoreInstanceId = 0);
 
 // AABB overlap test of a candidate placement against all OTHER placed modules
 // (the joint itself cannot overlap). `ignoreInstanceId` is skipped.

@@ -9,6 +9,7 @@ add_executable(x4sb-editor
   src/mesh_cache.cpp
   src/snaptest.cpp
   src/megashot.cpp
+  src/gizmoshot.cpp
   src/profile.cpp
   src/rdc_api.cpp
   src/rdc_capture.cpp

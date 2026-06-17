@@ -41,6 +41,16 @@ inline Vec3 rotate(Quat q, Vec3 v) {
   return {r.x, r.y, r.z};
 }
 
+// Unit quaternion for a rotation of `radians` about `axis` (need not be unit).
+// Identity if the axis is degenerate.
+[[nodiscard]] inline Quat axisAngle(Vec3 axis, double radians) {
+  const double len = length(axis);
+  if (len < 1e-12) return {};
+  const double half = radians * 0.5;
+  const double s = std::sin(half) / len;
+  return {std::cos(half), axis.x * s, axis.y * s, axis.z * s};
+}
+
 // Rigid-body transform: rotate, then translate. Default is identity.
 struct Transform {
   Vec3 position{};

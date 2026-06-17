@@ -62,4 +62,28 @@ class MoveModuleCommand : public Command {
   std::vector<std::pair<InstanceId, Link>> strippedNeighborLinks_;
 };
 
+// Move an existing module onto a target connector and establish the reciprocal
+// Link, as one reversible step. Like MoveModuleCommand it first detaches the
+// module's current links (and their reciprocals); it then sets the mate transform
+// and adds the new Link pair. Undo restores the old transform and all stripped/
+// added links. Preserves Link reciprocity.
+class SnapMoveCommand : public Command {
+ public:
+  SnapMoveCommand(InstanceId id, Transform mateTransform, InstanceId targetInstanceId,
+                  std::string thisPointId, std::string targetPointId);
+  void apply(Station& s) override;
+  void undo(Station& s) override;
+
+ private:
+  InstanceId id_;
+  Transform mateTransform_;
+  InstanceId targetInstanceId_;
+  std::string thisPointId_;
+  std::string targetPointId_;
+  Transform oldTransform_;
+  bool captured_{false};
+  std::vector<Link> removedOwnLinks_;
+  std::vector<std::pair<InstanceId, Link>> strippedNeighborLinks_;
+};
+
 }  // namespace x4sb

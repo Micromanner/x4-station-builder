@@ -71,6 +71,15 @@ TEST_CASE("AABB overlap detection") {
   CHECK_FALSE(overlaps(a, apart));
 }
 
+TEST_CASE("axisAngle: +90 deg about +Y sends +X to -Z") {
+  const double kHalfPi = 1.5707963267948966;
+  const Quat q90 = axisAngle(Vec3{0, 1, 0}, kHalfPi);
+  const Vec3 r = rotate(q90, Vec3{1, 0, 0});
+  CHECK(r.x == doctest::Approx(0).epsilon(1e-9));
+  CHECK(r.y == doctest::Approx(0).epsilon(1e-9));
+  CHECK(r.z == doctest::Approx(-1).epsilon(1e-9));
+}
+
 TEST_CASE("worldAabb rotates a box's hull conservatively") {
   const AABB local{{-1, -2, -3}, {1, 2, 3}};
 

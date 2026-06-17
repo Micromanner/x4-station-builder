@@ -124,4 +124,58 @@ void MoveModuleCommand::undo(Station& s) {
   }
 }
 
+SnapMoveCommand::SnapMoveCommand(InstanceId id, Transform mateTransform,
+                                 InstanceId targetInstanceId, std::string thisPointId,
+                                 std::string targetPointId)
+    : id_(id),
+      mateTransform_(mateTransform),
+      targetInstanceId_(targetInstanceId),
+      thisPointId_(std::move(thisPointId)),
+      targetPointId_(std::move(targetPointId)) {}
+
+void SnapMoveCommand::apply(Station& s) {
+  PlacedModule* m = s.find(id_);
+  if (!m) return;
+  oldTransform_ = m->worldTransform;
+  removedOwnLinks_ = m->links;
+  captured_ = true;
+
+  // Detach: drop the module's own links + the reciprocals on its neighbors.
+  strippedNeighborLinks_ = stripNeighborLinks(s, id_, removedOwnLinks_);
+  m->links.clear();
+  m->worldTransform = mateTransform_;
+
+  // Re-link to the target. Both pointers stay valid (no add/remove between them).
+  PlacedModule* target = s.find(targetInstanceId_);
+  if (target && targetInstanceId_ != id_) {
+    m->links.push_back(Link{thisPointId_, targetInstanceId_, targetPointId_});
+    target->links.push_back(Link{targetPointId_, id_, thisPointId_});
+  }
+}
+
+void SnapMoveCommand::undo(Station& s) {
+  if (!captured_) return;
+  PlacedModule* m = s.find(id_);
+  if (!m) return;
+
+  // Remove the reciprocal we added on apply, before restoring stripped links
+  // (a former neighbor could be the target; restoring first would double it).
+  if (PlacedModule* target = s.find(targetInstanceId_); target && targetInstanceId_ != id_) {
+    auto& links = target->links;
+    for (auto it = links.begin(); it != links.end();) {
+      if (it->otherInstanceId == id_ && it->thisPointId == targetPointId_ &&
+          it->otherPointId == thisPointId_)
+        it = links.erase(it);
+      else
+        ++it;
+    }
+  }
+
+  m->worldTransform = oldTransform_;
+  m->links = removedOwnLinks_;
+  for (const auto& entry : strippedNeighborLinks_) {
+    if (PlacedModule* nb = s.find(entry.first)) nb->links.push_back(entry.second);
+  }
+}
+
 }  // namespace x4sb

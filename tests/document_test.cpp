@@ -256,3 +256,106 @@ TEST_CASE("MoveModuleCommand does not duplicate a self-link on undo") {
   stack.undo(s);
   CHECK(s.find(id)->links.size() == 1);  // restored exactly once (guard prevents duplication)
 }
+
+TEST_CASE("SnapMoveCommand: moves, links reciprocally, and undo restores") {
+  Station s;
+  PlacedModule a;
+  a.defId = "a";
+  PlacedModule b;
+  b.defId = "b";
+  b.worldTransform.position = {100, 0, 0};
+  const InstanceId ida = s.add(a);
+  const InstanceId idb = s.add(b);
+
+  Transform mate;
+  mate.position = {1, 0, 0};
+  SnapMoveCommand cmd(idb, mate, ida, "b1", "a1");
+  cmd.apply(s);
+
+  const PlacedModule* pb = s.find(idb);
+  const PlacedModule* pa = s.find(ida);
+  REQUIRE(pb != nullptr);
+  REQUIRE(pa != nullptr);
+  CHECK(pb->worldTransform.position.x == doctest::Approx(1));
+  REQUIRE(pb->links.size() == 1);
+  CHECK(pb->links[0].thisPointId == "b1");
+  CHECK(pb->links[0].otherInstanceId == ida);
+  CHECK(pb->links[0].otherPointId == "a1");
+  REQUIRE(pa->links.size() == 1);  // reciprocal on the target
+  CHECK(pa->links[0].thisPointId == "a1");
+  CHECK(pa->links[0].otherInstanceId == idb);
+  CHECK(pa->links[0].otherPointId == "b1");
+
+  cmd.undo(s);
+  CHECK(s.find(idb)->worldTransform.position.x == doctest::Approx(100));
+  CHECK(s.find(idb)->links.empty());
+  CHECK(s.find(ida)->links.empty());
+}
+
+TEST_CASE("SnapMoveCommand: detaches a prior link, undo restores both ends") {
+  // b is initially linked to c; snap-moving b onto a strips the b<->c link,
+  // and undo brings it back.
+  Station s;
+  PlacedModule a;
+  a.defId = "a";
+  PlacedModule b;
+  b.defId = "b";
+  PlacedModule cc;
+  cc.defId = "c";
+  const InstanceId ida = s.add(a);
+  const InstanceId idb = s.add(b);
+  const InstanceId idc = s.add(cc);
+  // Establish a reciprocal b<->c link by hand.
+  s.find(idb)->links.push_back(Link{"b2", idc, "c1"});
+  s.find(idc)->links.push_back(Link{"c1", idb, "b2"});
+
+  SnapMoveCommand cmd(idb, Transform{}, ida, "b1", "a1");
+  cmd.apply(s);
+  CHECK(s.find(idc)->links.empty());          // b<->c stripped
+  REQUIRE(s.find(idb)->links.size() == 1);    // only the new b<->a link
+  CHECK(s.find(idb)->links[0].otherInstanceId == ida);
+
+  cmd.undo(s);
+  REQUIRE(s.find(idb)->links.size() == 1);
+  CHECK(s.find(idb)->links[0].otherInstanceId == idc);  // b<->c restored
+  CHECK(s.find(idc)->links.size() == 1);
+  CHECK(s.find(ida)->links.empty());                    // new link removed
+}
+
+TEST_CASE("SnapMoveCommand: former neighbor IS the target — undo ordering restores cleanly") {
+  // b is already linked to a on points b2<->a2; snap-moving b onto a via fresh
+  // points b1<->a1 detaches the old joint and forms the new one. This exercises
+  // the undo-ordering hazard the command guards against: a is BOTH the stripped
+  // neighbor AND the new target, so undo must remove the added reciprocal before
+  // restoring the stripped one or a is left with a dangling/duplicate link.
+  Station s;
+  PlacedModule a;
+  a.defId = "a";
+  PlacedModule b;
+  b.defId = "b";
+  const InstanceId ida = s.add(a);
+  const InstanceId idb = s.add(b);
+  s.find(idb)->links.push_back(Link{"b2", ida, "a2"});
+  s.find(ida)->links.push_back(Link{"a2", idb, "b2"});
+
+  SnapMoveCommand cmd(idb, Transform{}, ida, "b1", "a1");
+  cmd.apply(s);
+  // Exactly the new joint on both ends; the old b2<->a2 pair is gone.
+  REQUIRE(s.find(idb)->links.size() == 1);
+  CHECK(s.find(idb)->links[0].thisPointId == "b1");
+  CHECK(s.find(idb)->links[0].otherPointId == "a1");
+  REQUIRE(s.find(ida)->links.size() == 1);
+  CHECK(s.find(ida)->links[0].thisPointId == "a1");
+  CHECK(s.find(ida)->links[0].otherPointId == "b1");
+
+  cmd.undo(s);
+  // Original joint restored exactly on both ends; no dangling one-way link.
+  REQUIRE(s.find(idb)->links.size() == 1);
+  CHECK(s.find(idb)->links[0].thisPointId == "b2");
+  CHECK(s.find(idb)->links[0].otherInstanceId == ida);
+  CHECK(s.find(idb)->links[0].otherPointId == "a2");
+  REQUIRE(s.find(ida)->links.size() == 1);
+  CHECK(s.find(ida)->links[0].thisPointId == "a2");
+  CHECK(s.find(ida)->links[0].otherInstanceId == idb);
+  CHECK(s.find(ida)->links[0].otherPointId == "b2");
+}

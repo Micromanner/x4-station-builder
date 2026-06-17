@@ -22,6 +22,13 @@ ModuleDef makeModule(const std::string& id, const std::string& pointId, Vec3 poi
   d.connectionPoints.push_back(cp);
   return d;
 }
+
+ModuleDef makeModule(const std::string& id, Category category, const std::string& pointId,
+                     Vec3 pointPos) {
+  ModuleDef d = makeModule(id, pointId, pointPos);
+  d.category = category;
+  return d;
+}
 }  // namespace
 
 TEST_CASE("empty station yields no candidate and no collision") {
@@ -270,6 +277,38 @@ TEST_CASE("makeSnapPlacement returns nullptr when the placement would collide") 
   // Candidate A.a1 is found in range, but B lands at ~{10,0,0} inside X's hull
   // (A is the ignored joint partner) -> collision -> nullptr.
   CHECK(makeSnapPlacement(bdef, Vec3{10.2, 0, 0}, station, catalog, 1.0) == nullptr);
+}
+
+TEST_CASE("findSnapCandidate skips the ignored instance") {
+  // Two placed modules, each with one free compatible connector. A cursor near
+  // module A's connector normally returns A; ignoring A must return B instead
+  // (or none if B is out of range).
+  ModuleCatalog c;
+  ModuleDef a = makeModule("a_mod", Category::Production, "a1", {0.5, 0, 0});
+  ModuleDef b = makeModule("b_mod", Category::Production, "b1", {0.5, 0, 0});
+  c.add(a);
+  c.add(b);
+
+  Station s;
+  PlacedModule pa;
+  pa.defId = "a_mod";  // a1 world = (0.5, 0, 0)
+  PlacedModule pb;
+  pb.defId = "b_mod";
+  pb.worldTransform.position = {10, 0, 0};  // b1 world = (10.5, 0, 0)
+  const InstanceId ida = s.add(pa);
+  s.add(pb);
+
+  ModuleDef mover = makeModule("m_mod", Category::Production, "m1", {0, 0, 0});
+
+  // Cursor right at A's connector, generous radius: without ignore -> picks A.
+  const auto hit = findSnapCandidate(mover, Vec3{0.5, 0, 0}, s, c, 100.0);
+  REQUIRE(hit.has_value());
+  CHECK(hit->instanceId == ida);
+
+  // Ignoring A -> must now pick B (the only other free connector in range).
+  const auto hitIgnoreA = findSnapCandidate(mover, Vec3{0.5, 0, 0}, s, c, 100.0, ida);
+  REQUIRE(hitIgnoreA.has_value());
+  CHECK(hitIgnoreA->instanceId != ida);
 }
 
 TEST_CASE("integration: snap-place then pick then move detaches and undo reattaches") {

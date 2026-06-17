@@ -3,6 +3,7 @@
 // logic in libs/editorcore) and draw it. All scene geometry is in X4 native space;
 // the renderer applies the single (1,1,-1) handedness flip.
 #include "app_paths.hpp"
+#include "gizmoshot.hpp"
 #include "input.hpp"
 #include "mesh_cache.hpp"
 #include "orbit_camera.hpp"
@@ -73,6 +74,9 @@ int main(int argc, char** argv) {
     if (std::string(argv[i]) == "--megashot" && i + 2 < argc) {
       return x4sb::editor::runMegaShot(std::string(argv[i + 1]), std::string(argv[i + 2]));
     }
+    if (std::string(argv[i]) == "--gizmoshot") {
+      return x4sb::editor::runGizmoShot(std::string(argv[i + 1]));
+    }
     if (std::string(argv[i]) == "--profile" && i + 2 < argc) {
       return x4sb::editor::runProfile(std::string(argv[i + 1]), std::atoi(argv[i + 2]));
     }
@@ -122,18 +126,7 @@ int main(int argc, char** argv) {
           toastUntil = GetTime() + 4.0;
         }
 
-        // Mouse ray in X4 space drives the ghost preview every frame.
-        x4sb::Vec3 ro{};
-        x4sb::Vec3 rd{};
-        x4sb::editor::mouseRayX4(cam.camera(), ro, rd);
-        state.updateGhost(ro, rd);
-
-        if (IsMouseButtonPressed(MOUSE_BUTTON_LEFT)) {
-          // Commit a valid ghost; otherwise treat the click as a selection.
-          const bool placed = state.ghost().has_value() && state.ghost()->valid &&
-                              state.commitGhost().has_value();
-          if (!placed) state.selectByRay(ro, rd);
-        }
+        x4sb::editor::handleMouse(state, cam.camera());
       }
 
       BeginDrawing();

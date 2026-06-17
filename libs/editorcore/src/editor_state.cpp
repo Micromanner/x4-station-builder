@@ -2,6 +2,7 @@
 
 #include "x4sb/document/commands.hpp"
 #include "x4sb/snap/pick.hpp"
+#include "x4sb/snap/snap.hpp"
 
 #include <algorithm>
 #include <cmath>
@@ -53,46 +54,54 @@ void EditorState::setFilter(std::optional<Category> cat) {
   activeIndex_ = 0;
 }
 
-void EditorState::updateGhost(Vec3 rayOriginX4, Vec3 rayDirX4) {
+void EditorState::updateGhost(Vec3 rayOriginX4, Vec3 rayDirX4, bool forceFree) {
   ghost_.reset();
+  if (!placementEnabled_) return;  // select mode: no ghost, so clicks select
   const ModuleDef* def = activeDef();
   if (def == nullptr) return;
 
-  if (station_.empty()) {
-    if (std::abs(rayDirX4.y) < 1e-9) return;  // parallel to the ground plane
-    const double t = (groundY_ - rayOriginX4.y) / rayDirX4.y;
-    if (t < 0.0) return;  // ground is behind the ray origin
-    Transform root;       // identity rotation
-    root.position = rayOriginX4 + rayDirX4 * t;
-    ghost_ = Ghost{def->id, root, /*valid=*/true, std::nullopt};
-    return;
+  // Snap path: aim at a placed module and mate onto its nearest free connector.
+  if (!forceFree && !station_.empty()) {
+    const std::optional<InstanceId> hitId =
+        pickModule(station_, catalog_, rayOriginX4, rayDirX4);
+    if (hitId) {
+      const PlacedModule* pm = station_.find(*hitId);
+      const ModuleDef* hitDef = pm ? catalog_.find(pm->defId) : nullptr;
+      if (hitDef) {
+        const AABB worldBox = worldAabb(hitDef->aabb, pm->worldTransform);
+        const std::optional<double> t = rayIntersectsAabb(rayOriginX4, rayDirX4, worldBox);
+        if (t) {
+          const Vec3 cursor = rayOriginX4 + rayDirX4 * (*t);
+          const std::optional<SnapCandidate> cand =
+              findSnapCandidate(*def, cursor, station_, catalog_, snapRadius_);
+          if (cand) {
+            const Transform xf = computeSnapTransform(station_, catalog_, cand->instanceId,
+                                                      cand->targetPointId, *def, cand->newPointId);
+            // No collision gating in the box-proxy phase (boxes >> meshes; correct
+            // joints overlap). A snap is valid whenever a free compatible connector
+            // is found. Revisit with OBB/real-mesh collision (spec §6).
+            ghost_ = Ghost{def->id, xf, /*valid=*/true, cand};
+            return;
+          }
+        }
+      }
+    }
   }
-  // Non-empty station: the new module snaps to the nearest free connector near
-  // where the ray strikes the nearest module's box (parent §6).
-  const std::optional<InstanceId> hitId = pickModule(station_, catalog_, rayOriginX4, rayDirX4);
-  if (!hitId) return;
-  const PlacedModule* pm = station_.find(*hitId);
-  if (pm == nullptr) return;
-  const ModuleDef* hitDef = catalog_.find(pm->defId);
-  if (hitDef == nullptr) return;
 
-  const AABB worldBox = worldAabb(hitDef->aabb, pm->worldTransform);
-  const std::optional<double> t = rayIntersectsAabb(rayOriginX4, rayDirX4, worldBox);
-  if (!t) return;
-  const Vec3 cursor = rayOriginX4 + rayDirX4 * (*t);
+  // Free-place fallback (also the empty-station root case): a view-facing standoff
+  // a fixed distance in front of the camera along the cursor ray. This is the fix
+  // for the "feels 2D" problem — projecting onto a ground plane made vertical mouse
+  // motion sweep the hit point near/far; a standoff moves the ghost up/down on
+  // screen instead. The mouse ray's direction is unit length (GetScreenToWorldRay).
+  Transform xf;
+  xf.position = rayOriginX4 + rayDirX4 * placeDistance_;
+  xf.rotation = pendingRotation_;
+  ghost_ = Ghost{def->id, xf, /*valid=*/true, std::nullopt};
+}
 
-  const std::optional<SnapCandidate> cand =
-      findSnapCandidate(*def, cursor, station_, catalog_, snapRadius_);
-  if (!cand) return;
-
-  const Transform xf = computeSnapTransform(station_, catalog_, cand->instanceId,
-                                            cand->targetPointId, *def, cand->newPointId);
-  // No collision gating in the box-proxy phase: AABB boxes are far larger than the
-  // real meshes, so neighbours overlap at correct joints and an AABB collision test
-  // would reject almost every placement in a multi-module station. A snap is valid
-  // whenever a compatible free connector is found. (Revisit with OBB/real-mesh
-  // collision once meshes land — collidesWithStation/makeSnapPlacement still exist.)
-  ghost_ = Ghost{def->id, xf, /*valid=*/true, cand};
+void EditorState::rotateGhost(Vec3 worldAxis) {
+  constexpr double kHalfPi = 1.5707963267948966;  // 90deg
+  pendingRotation_ = axisAngle(worldAxis, kHalfPi) * pendingRotation_;
 }
 
 std::optional<InstanceId> EditorState::commitGhost() {
@@ -107,6 +116,7 @@ std::optional<InstanceId> EditorState::commitGhost() {
   }
   undo_.execute(station_, std::move(cmd));
   ghost_.reset();
+  pendingRotation_ = Quat{};  // spec §5: rotation resets on commit
   if (station_.modules().empty()) return std::nullopt;
   // PlaceModuleCommand appends the new module (Station::add push_backs), so the
   // just-placed one is at the back. Holds while place always appends.
@@ -118,6 +128,7 @@ void EditorState::loadStation(Station station) {
   undo_ = UndoStack{};  // UndoStack has no clear(); a fresh instance is the reset
   selected_.reset();
   ghost_.reset();
+  placementEnabled_ = true;  // fresh document starts in build mode
 }
 
 std::optional<InstanceId> EditorState::selectByRay(Vec3 rayOriginX4, Vec3 rayDirX4) {
@@ -130,6 +141,123 @@ bool EditorState::deleteSelected() {
   undo_.execute(station_, std::make_unique<DeleteModuleCommand>(*selected_));
   selected_.reset();
   return true;
+}
+
+bool EditorState::beginGizmoDrag(Vec3 rayOriginX4, Vec3 rayDirX4, double gizmoScale) {
+  if (!selected_) return false;
+  const PlacedModule* m = station_.find(*selected_);
+  if (m == nullptr) return false;
+  const GizmoModel g = gizmoModel(m->worldTransform.position, gizmoScale);
+  const std::optional<GizmoHandle> handle = gizmoPick(g, rayOriginX4, rayDirX4);
+  if (!handle) return false;
+
+  ghost_.reset();  // a grab is not a placement
+  GizmoDrag d;
+  d.id = *selected_;
+  d.handle = *handle;
+  d.startRayOrigin = rayOriginX4;
+  d.startRayDir = rayDirX4;
+  d.startTransform = m->worldTransform;
+  d.preview = m->worldTransform;
+  drag_ = d;
+  return true;
+}
+
+void EditorState::updateGizmoDrag(Vec3 rayOriginX4, Vec3 rayDirX4, bool forceFree) {
+  if (!drag_) return;
+  const PlacedModule* m = station_.find(drag_->id);
+  if (m == nullptr) {
+    drag_.reset();
+    return;
+  }
+  const ModuleDef* def = catalog_.find(m->defId);
+  if (def == nullptr) {
+    drag_.reset();
+    return;
+  }
+
+  // Rotation handles spin the module in place about the ring axis — no translation,
+  // no snap-on-move.
+  if (gizmoIsRotation(drag_->handle)) {
+    const double angle = gizmoDragRotation(drag_->handle, drag_->startTransform.position,
+                                           drag_->startRayOrigin, drag_->startRayDir, rayOriginX4,
+                                           rayDirX4);
+    Transform rotated = drag_->startTransform;
+    rotated.rotation = axisAngle(gizmoAxisDir(drag_->handle), angle) * drag_->startTransform.rotation;
+    drag_->snap.reset();
+    drag_->preview = rotated;
+    return;
+  }
+
+  const Vec3 delta = gizmoDragDelta(drag_->handle, drag_->startTransform.position,
+                                    drag_->startRayOrigin, drag_->startRayDir, rayOriginX4,
+                                    rayDirX4);
+  Transform freePose = drag_->startTransform;
+  freePose.position = drag_->startTransform.position + delta;
+  drag_->snap.reset();
+  drag_->preview = freePose;
+
+  if (!forceFree) {
+    const std::optional<SnapCandidate> cand = findSnapCandidate(
+        *def, freePose.position, station_, catalog_, dragSnapRadius_, drag_->id);
+    if (cand) {
+      drag_->snap = cand;
+      drag_->preview = computeSnapTransform(station_, catalog_, cand->instanceId,
+                                            cand->targetPointId, *def, cand->newPointId);
+    }
+  }
+}
+
+bool EditorState::endGizmoDrag() {
+  if (!drag_) return false;
+  const GizmoDrag d = *drag_;
+  drag_.reset();
+  if (d.snap) {
+    undo_.execute(station_, std::make_unique<SnapMoveCommand>(
+                                d.id, d.preview, d.snap->instanceId, d.snap->newPointId,
+                                d.snap->targetPointId));
+    return true;
+  }
+  // Commit if the pose actually changed in position OR orientation — a rotation
+  // drag leaves the position fixed, so a position-only check would drop it.
+  const Vec3 moved = d.preview.position - d.startTransform.position;
+  const Quat& qp = d.preview.rotation;
+  const Quat& qs = d.startTransform.rotation;
+  const double qdot = std::abs(qp.w * qs.w + qp.x * qs.x + qp.y * qs.y + qp.z * qs.z);
+  const bool changed = length(moved) > 1e-9 || qdot < 1.0 - 1e-9;
+  if (!changed) return false;  // a click, not a drag
+  undo_.execute(station_, std::make_unique<MoveModuleCommand>(d.id, d.preview));
+  return true;
+}
+
+std::optional<Transform> EditorState::dragPreview() const {
+  if (!drag_) return std::nullopt;
+  return drag_->preview;
+}
+
+bool EditorState::rotateSelected(Vec3 worldAxis) {
+  if (!selected_) return false;
+  const PlacedModule* m = station_.find(*selected_);
+  if (m == nullptr) return false;
+  constexpr double kHalfPi = 1.5707963267948966;
+  Transform t = m->worldTransform;
+  t.rotation = axisAngle(worldAxis, kHalfPi) * t.rotation;
+  undo_.execute(station_, std::make_unique<MoveModuleCommand>(*selected_, t));
+  return true;
+}
+
+void EditorState::updateGizmoHover(Vec3 rayOriginX4, Vec3 rayDirX4, double gizmoScale) {
+  hoveredHandle_.reset();
+  if (drag_ || !selected_) return;  // a drag owns the highlight; nothing to hover otherwise
+  const PlacedModule* m = station_.find(*selected_);
+  if (m == nullptr) return;
+  const GizmoModel g = gizmoModel(m->worldTransform.position, gizmoScale);
+  hoveredHandle_ = gizmoPick(g, rayOriginX4, rayDirX4);
+}
+
+std::optional<GizmoHandle> EditorState::highlightHandle() const {
+  if (drag_) return drag_->handle;
+  return hoveredHandle_;
 }
 
 }  // namespace x4sb

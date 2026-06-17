@@ -1,5 +1,6 @@
 #include "render.hpp"
 
+#include "input.hpp"  // gizmoScaleFor
 #include "mesh_cache.hpp"
 #include "profiling.hpp"
 #include "raylib_convert.hpp"
@@ -7,8 +8,10 @@
 
 #include "x4sb/data/types.hpp"
 #include "x4sb/editorcore/display_flip.hpp"
+#include "x4sb/editorcore/gizmo.hpp"
 
 #include <algorithm>
+#include <array>
 #include <cmath>
 #include <cstdio>
 #include <optional>
@@ -102,9 +105,11 @@ bool drawModuleMeshes(const ModuleDef& def, const Transform& xf, MeshCache& mesh
   return true;
 }
 
-void drawConnectors(const ModuleDef& def, const PlacedModule& pm) {
+// `xf` is the pose to draw at — normally pm.worldTransform, but the live drag
+// preview pose for the module being dragged, so its markers track the mesh.
+void drawConnectors(const ModuleDef& def, const PlacedModule& pm, const Transform& xf) {
   for (const auto& cp : def.connectionPoints) {
-    const Vec3 world = apply(pm.worldTransform, cp.localPosition);
+    const Vec3 world = apply(xf, cp.localPosition);
     const bool linked = pointIsLinked(pm, cp.id);
     // Orange (free) / gray (occupied) so markers read distinctly from the blue
     // orientation-gizmo axis/tip.
@@ -114,7 +119,7 @@ void drawConnectors(const ModuleDef& def, const PlacedModule& pm) {
     // same axis the snap solver mates about (snap.cpp `kMate`, spec §3.1); if
     // that convention is corrected against real data, update this axis too, or
     // the markers will mislead the eyeball check of a snap.
-    const Vec3 n = rotate(pm.worldTransform.rotation * cp.localRotation, Vec3{0, 0, 1});
+    const Vec3 n = rotate(xf.rotation * cp.localRotation, Vec3{0, 0, 1});
     DrawLine3D(toRl(world), toRl(world + n * 80.0), c);  // X4 scale normal stub
   }
 }
@@ -278,9 +283,19 @@ constexpr float kMeshPx = 12.0f;
 // to full detail; pass nullopt for none.
 void drawPlacedModules(const Station& station, const ModuleCatalog& catalog,
                        std::optional<InstanceId> selected, MeshCache& meshes, bool showGizmos,
-                       bool showMeshes, const ::Camera3D& camera, bool allConnectors) {
+                       bool showMeshes, const ::Camera3D& camera, bool allConnectors,
+                       std::optional<Transform> selectedPreview) {
   const double projF = projFactor(camera);
   const ViewCull vc = viewCull(camera);
+
+  // While the selected module is being gizmo-dragged, draw it at the live preview
+  // pose (so the real mesh moves/rotates with the drag) instead of its committed
+  // transform — the AABB-box-only preview gave no real feedback. Cull/LOD in pass 1a
+  // still use the committed pose, which is fine: the selected module is never culled
+  // and always drawn at full detail.
+  const auto xfFor = [&](const PlacedModule& pm, bool sel) -> const Transform& {
+    return (sel && selectedPreview) ? *selectedPreview : pm.worldTransform;
+  };
 
   // Declared before pass 1 (which fills it) so pass 2 can read it from its own
   // profiler zone scope. Most modules collapse to a box; size up front.
@@ -324,7 +339,7 @@ void drawPlacedModules(const Station& station, const ModuleCatalog& catalog,
     rlEnableBackfaceCulling();
     for (const auto& [path, xforms] : instances) meshes.drawInstanced(path, xforms, LIGHTGRAY);
     if (selDef != nullptr && selPm != nullptr &&
-        !drawModuleMeshes(*selDef, selPm->worldTransform, meshes, YELLOW))
+        !drawModuleMeshes(*selDef, xfFor(*selPm, true), meshes, YELLOW))
       boxes.emplace_back(selDef, selPm);
     rlDisableBackfaceCulling();
   }
@@ -334,7 +349,7 @@ void drawPlacedModules(const Station& station, const ModuleCatalog& catalog,
     ZoneScopedN("modules: boxes");
     for (const auto& [def, pm] : boxes) {
       const bool sel = selected.has_value() && *selected == pm->instanceId;
-      drawModuleBox(*def, pm->worldTransform, sel ? ::Color{180, 160, 40, 255} : kBoxFill,
+      drawModuleBox(*def, xfFor(*pm, sel), sel ? ::Color{180, 160, 40, 255} : kBoxFill,
                     sel ? YELLOW : kBoxEdge);
     }
   }
@@ -349,8 +364,8 @@ void drawPlacedModules(const Station& station, const ModuleCatalog& catalog,
       if (!allConnectors && !sel) continue;
       const ModuleDef* def = catalog.find(pm.defId);
       if (def == nullptr) continue;
-      drawConnectors(*def, pm);
-      if (showGizmos) drawAxisGizmo(*def, pm.worldTransform);
+      drawConnectors(*def, pm, xfFor(pm, sel));
+      if (showGizmos) drawAxisGizmo(*def, xfFor(pm, sel));
     }
   }
 }
@@ -398,7 +413,7 @@ void drawScene(const EditorState& state, const ::Camera3D& camera, MeshCache& me
   beginScene(camera);
 
   drawPlacedModules(state.station(), state.catalog(), state.selected(), meshes, showGizmos,
-                    showMeshes, camera, /*allConnectors=*/false);
+                    showMeshes, camera, /*allConnectors=*/false, state.dragPreview());
 
   if (state.ghost()) {
     const ModuleDef* gdef = state.defFor(state.ghost()->defId);
@@ -415,7 +430,104 @@ void drawScene(const EditorState& state, const ::Camera3D& camera, MeshCache& me
     }
   }
 
+  // Translate gizmo + drag preview last, inside the scene's global flip (its
+  // axes are X4-native, like every other primitive here), before endScene().
+  drawTranslateGizmo(state, camera);
+
   endScene();
+}
+
+void drawTranslateGizmo(const EditorState& state, const ::Camera3D& camera) {
+  if (!state.selected()) return;
+  const PlacedModule* m = state.station().find(*state.selected());
+  if (m == nullptr) return;
+  // Gizmo follows the live drag preview when dragging, else the module origin.
+  const std::optional<Transform> preview = state.dragPreview();
+  const Vec3 origin = preview ? preview->position : m->worldTransform.position;
+  const double scale = gizmoScaleFor(camera, state);
+  const GizmoModel g = gizmoModel(origin, scale);
+
+  const std::optional<GizmoHandle> hl = state.highlightHandle();
+  const ::Color kHi{255, 255, 160, 255};  // hovered/active handle lights up
+  const ::Vector3 o = toRl(g.origin);
+
+  // Axis arrows: a solid cylinder shaft + a cone tip, so the handle reads in 3D
+  // and the click target is obvious (thin lines were the clunk). The hovered or
+  // dragged axis highlights.
+  const double headLen = 0.28 * g.axisLength;
+  const float shaftR = static_cast<float>(0.022 * g.axisLength);
+  const float headR = static_cast<float>(0.065 * g.axisLength);
+  struct AxisVis {
+    GizmoHandle handle;
+    ::Color color;
+  };
+  const std::array<AxisVis, 3> axes{{
+      {GizmoHandle::AxisX, RED},
+      {GizmoHandle::AxisY, GREEN},
+      {GizmoHandle::AxisZ, BLUE},
+  }};
+  for (const AxisVis& a : axes) {
+    const ::Color col = (hl && *hl == a.handle) ? kHi : a.color;
+    const Vec3 dir = gizmoAxisDir(a.handle);
+    const ::Vector3 neck = toRl(g.origin + dir * (g.axisLength - headLen));
+    const ::Vector3 tip = toRl(g.origin + dir * g.axisLength);
+    DrawCylinderEx(o, neck, shaftR, shaftR, 10, col);  // shaft
+    DrawCylinderEx(neck, tip, headR, 0.0F, 12, col);   // arrowhead
+  }
+
+  // Plane handles: a small filled translucent quad over the pickable 0..planeSize
+  // region (the recognizable plane-drag affordance), coloured by the axis it is
+  // normal to; the hovered one highlights. Only the two OUTER edges are outlined —
+  // the inner two would lie ON the X/Y/Z axes and just double the arrows (the
+  // user's "redundant axis lines"). Backface culling is disabled at gizmo-draw
+  // time, so a single winding per triangle shows from both sides.
+  struct PlaneVis {
+    GizmoHandle handle;
+    Vec3 u;
+    Vec3 v;
+    ::Color color;
+  };
+  const std::array<PlaneVis, 3> planes{{
+      {GizmoHandle::PlaneXY, {1, 0, 0}, {0, 1, 0}, BLUE},
+      {GizmoHandle::PlaneYZ, {0, 1, 0}, {0, 0, 1}, RED},
+      {GizmoHandle::PlaneZX, {0, 0, 1}, {1, 0, 0}, GREEN},
+  }};
+  for (const PlaneVis& p : planes) {
+    const bool hot = hl && *hl == p.handle;
+    const ::Color edge = hot ? kHi : p.color;
+    const ::Color fill{edge.r, edge.g, edge.b, static_cast<unsigned char>(hot ? 130 : 60)};
+    const ::Vector3 a = toRl(g.origin + p.u * g.planeSize);
+    const ::Vector3 corner = toRl(g.origin + (p.u + p.v) * g.planeSize);
+    const ::Vector3 c = toRl(g.origin + p.v * g.planeSize);
+    DrawTriangle3D(o, a, corner, fill);
+    DrawTriangle3D(o, corner, c, fill);
+    DrawLine3D(a, corner, edge);
+    DrawLine3D(corner, c, edge);
+  }
+
+  // Rotation rings: one clean circle per axis, in the plane normal to that axis,
+  // at ringRadius. The rings are large, so a single line reads fine; the hovered/
+  // active ring highlights. (DrawCircle3D draws the default XY circle tilted by
+  // axis+angle.)
+  struct RingVis {
+    GizmoHandle handle;
+    ::Vector3 tiltAxis;
+    float tiltDeg;
+    ::Color color;
+  };
+  const std::array<RingVis, 3> rings{{
+      {GizmoHandle::RotX, ::Vector3{0, 1, 0}, 90.0F, RED},    // ring in YZ plane
+      {GizmoHandle::RotY, ::Vector3{1, 0, 0}, 90.0F, GREEN},  // ring in XZ plane
+      {GizmoHandle::RotZ, ::Vector3{0, 0, 1}, 0.0F, BLUE},    // ring in XY plane
+  }};
+  for (const RingVis& rv : rings) {
+    const ::Color col = (hl && *hl == rv.handle) ? kHi : rv.color;
+    DrawCircle3D(o, static_cast<float>(g.ringRadius), rv.tiltAxis, rv.tiltDeg, col);
+  }
+
+  // The selected module's real mesh now tracks the drag preview pose live (see
+  // drawPlacedModules' selectedPreview), so no AABB-box ghost is drawn here — the
+  // mesh itself IS the feedback.
 }
 
 void drawScene(const Station& station, const ModuleCatalog& catalog, const ::Camera3D& camera,
@@ -423,7 +535,7 @@ void drawScene(const Station& station, const ModuleCatalog& catalog, const ::Cam
   ZoneScoped;
   beginScene(camera);
   drawPlacedModules(station, catalog, std::nullopt, meshes, showGizmos, showMeshes, camera,
-                    allConnectors);
+                    allConnectors, std::nullopt);
   endScene();
 }
 
@@ -431,8 +543,13 @@ void drawHud(const EditorState& state, int screenWidth, int /*screenHeight*/, bo
   const ModuleDef* def = state.activeDef();
   char line[256];
 
-  std::snprintf(line, sizeof(line), "Active: %s", def != nullptr ? def->id.c_str() : "(none)");
-  DrawText(line, 12, 10, 20, RAYWHITE);
+  if (state.placementEnabled()) {
+    std::snprintf(line, sizeof(line), "BUILD  Active: %s",
+                  def != nullptr ? def->id.c_str() : "(none)");
+    DrawText(line, 12, 10, 20, RAYWHITE);
+  } else {
+    DrawText("SELECT  (Q to build)  -  click a placed module to select it", 12, 10, 20, GOLD);
+  }
 
   const char* filt = state.filter().has_value() ? categoryName(*state.filter()) : "All";
   std::snprintf(line, sizeof(line), "Filter: %s    %zu/%zu", filt,
@@ -447,8 +564,9 @@ void drawHud(const EditorState& state, int screenWidth, int /*screenHeight*/, bo
   DrawText(
       "[ / ]=cycle  1=Prod 2=Stor 3=Hab 4=Dock 5=Def 6=Conn 7=Other  0=all  G=gizmos  M=mesh/box",
       12, 78, 14, GRAY);
-  DrawText("LMB=place/select   Del or X=delete   Ctrl+Z/Y=undo/redo   RMB=orbit   wheel=zoom   F=frame",
-           12, 96, 14, GRAY);
+  DrawText(
+      "LMB=place/select/drag-gizmo   Q=build/select   R/Shift+R/Ctrl+R=rotate   Alt=free   Del/X=delete   Ctrl+Z/Y=undo/redo   RMB=orbit   wheel=zoom   F=frame",
+      12, 96, 14, GRAY);
 
   DrawFPS(screenWidth - 90, 10);
 }

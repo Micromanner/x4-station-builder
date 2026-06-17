@@ -85,12 +85,19 @@ TEST_CASE("root free-place: ghost on ground, commit adds module, undo/redo") {
   CHECK(s.station().size() == 1);
 }
 
-TEST_CASE("root ghost is absent when the ray misses the ground plane") {
+TEST_CASE("free-place uses a camera standoff, not the ground plane") {
   const ModuleCatalog c = twoModuleCatalog();
   EditorState s(c);
-  s.updateGhost(Vec3{0, 10, 0}, Vec3{0, 1, 0});  // pointing up, away from ground
-  CHECK_FALSE(s.ghost().has_value());
-  CHECK(s.commitGhost() == std::nullopt);
+  s.setPlaceDistance(20.0);
+  // An up-pointing ray used to mean "no ground hit -> no ghost"; with a view-facing
+  // standoff the ghost simply sits placeDistance along the ray, so vertical aim
+  // still places (and moving the mouse up/down moves the ghost up/down on screen).
+  s.updateGhost(Vec3{0, 10, 0}, Vec3{0, 1, 0});
+  REQUIRE(s.ghost().has_value());
+  CHECK_FALSE(s.ghost()->candidate.has_value());
+  CHECK(s.ghost()->worldTransform.position.x == doctest::Approx(0));
+  CHECK(s.ghost()->worldTransform.position.y == doctest::Approx(30));  // 10 + 1*20
+  CHECK(s.ghost()->worldTransform.position.z == doctest::Approx(0));
 }
 
 TEST_CASE("snap ghost: aim at a placed module -> previews onto its free connector") {
@@ -122,14 +129,35 @@ TEST_CASE("snap ghost: aim at a placed module -> previews onto its free connecto
   CHECK(mods.back().links[0].otherPointId == "a1");
 }
 
-TEST_CASE("snap ghost absent when the ray hits no module") {
+TEST_CASE("free-place ghost when the ray hits no module") {
   const ModuleCatalog c = twoModuleCatalog();
   EditorState s(c);
   s.updateGhost(Vec3{0, 10, 0}, Vec3{0, -1, 0});  // root
   REQUIRE(s.commitGhost().has_value());
   s.cycleActive(1);
-  s.updateGhost(Vec3{100, 100, 100}, Vec3{0, 1, 0});  // points away from everything
-  CHECK_FALSE(s.ghost().has_value());
+  // Aiming at empty space no longer means "no ghost" — it free-places at the
+  // standoff, which is what lets you start a disconnected second cluster.
+  s.updateGhost(Vec3{100, 100, 100}, Vec3{0, 1, 0});
+  REQUIRE(s.ghost().has_value());
+  CHECK_FALSE(s.ghost()->candidate.has_value());
+}
+
+TEST_CASE("togglePlacement: select mode suppresses the ghost so clicks can select") {
+  const ModuleCatalog c = twoModuleCatalog();
+  EditorState s(c);  // build mode by default, active = a_mod
+  s.updateGhost(Vec3{0, 10, 0}, Vec3{0, -1, 0});
+  REQUIRE(s.ghost().has_value());  // build mode: a ghost is present
+
+  s.togglePlacement();  // -> select mode
+  CHECK_FALSE(s.placementEnabled());
+  s.updateGhost(Vec3{0, 10, 0}, Vec3{0, -1, 0});
+  CHECK_FALSE(s.ghost().has_value());          // no ghost -> a left-click will select
+  CHECK(s.commitGhost() == std::nullopt);      // nothing to commit in select mode
+
+  s.togglePlacement();  // -> back to build mode
+  CHECK(s.placementEnabled());
+  s.updateGhost(Vec3{0, 10, 0}, Vec3{0, -1, 0});
+  CHECK(s.ghost().has_value());
 }
 
 TEST_CASE("select by ray, delete, and undo restores the module") {
@@ -162,6 +190,47 @@ TEST_CASE("select by ray, delete, and undo restores the module") {
   CHECK_FALSE(s.deleteSelected());  // nothing selected now -> no-op
 }
 
+TEST_CASE("free-place fallback: non-empty station, ray misses modules -> ground ghost") {
+  const ModuleCatalog c = twoModuleCatalog();
+  EditorState s(c);  // active = a_mod
+  // Root-place a_mod at origin.
+  s.updateGhost(Vec3{0, 10, 0}, Vec3{0, -1, 0});
+  REQUIRE(s.commitGhost().has_value());
+
+  s.cycleActive(1);  // b_mod
+  // Down-ray far from the placed module -> no snap target -> free ghost on ground.
+  s.updateGhost(Vec3{50, 10, 50}, Vec3{0, -1, 0});
+  REQUIRE(s.ghost().has_value());
+  CHECK(s.ghost()->valid);
+  CHECK_FALSE(s.ghost()->candidate.has_value());  // free, not snapped
+  CHECK(s.ghost()->worldTransform.position.x == doctest::Approx(50));
+  CHECK(s.ghost()->worldTransform.position.z == doctest::Approx(50));
+}
+
+TEST_CASE("forceFree overrides an available snap target") {
+  const ModuleCatalog c = twoModuleCatalog();
+  EditorState s(c);
+  s.updateGhost(Vec3{0, 10, 0}, Vec3{0, -1, 0});
+  REQUIRE(s.commitGhost().has_value());
+  s.cycleActive(1);  // b_mod
+
+  // Aim straight down at the placed a_mod. Normally snaps; forceFree -> free ghost.
+  s.updateGhost(Vec3{0, 10, 0}, Vec3{0, -1, 0}, /*forceFree=*/true);
+  REQUIRE(s.ghost().has_value());
+  CHECK_FALSE(s.ghost()->candidate.has_value());
+  CHECK(s.ghost()->worldTransform.position.y == doctest::Approx(0));
+}
+
+TEST_CASE("rotateGhost orients the free placement ghost in 90-degree steps") {
+  const ModuleCatalog c = twoModuleCatalog();
+  EditorState s(c);
+  s.rotateGhost(Vec3{0, 1, 0});  // +90 about Y
+  s.updateGhost(Vec3{0, 10, 0}, Vec3{0, -1, 0});  // empty station -> free root ghost
+  REQUIRE(s.ghost().has_value());
+  const Vec3 r = rotate(s.ghost()->worldTransform.rotation, Vec3{1, 0, 0});
+  CHECK(r.z == doctest::Approx(-1).epsilon(1e-9));  // +X rotated to -Z
+}
+
 TEST_CASE("loadStation replaces the document and resets history/selection/ghost") {
   const ModuleCatalog c = twoModuleCatalog();
   EditorState s(c);
@@ -186,4 +255,129 @@ TEST_CASE("loadStation replaces the document and resets history/selection/ghost"
   CHECK_FALSE(s.canRedo());
   CHECK_FALSE(s.selected().has_value());
   CHECK_FALSE(s.ghost().has_value());
+}
+
+TEST_CASE("gizmo drag: free move of a lone module commits a MoveModuleCommand") {
+  const ModuleCatalog c = twoModuleCatalog();
+  EditorState s(c);  // a_mod
+  s.updateGhost(Vec3{0, 10, 0}, Vec3{0, -1, 0});
+  const InstanceId id = s.commitGhost().value();
+  s.selectByRay(Vec3{0, 0, -10}, Vec3{0, 0, 1});
+  REQUIRE(s.selected().value() == id);
+
+  const double scale = 5.0;  // axisLength 5 -> handle spans x in [0,5]
+  // Grab +X: ray down at x=2 hits (2,0,0) on the axis.
+  REQUIRE(s.beginGizmoDrag(Vec3{2, 5, 0}, Vec3{0, -1, 0}, scale));
+  REQUIRE(s.dragging());
+  // Drag to x=4 -> delta +2 along X (lone module: no snap target).
+  s.updateGizmoDrag(Vec3{4, 5, 0}, Vec3{0, -1, 0});
+  REQUIRE(s.dragPreview().has_value());
+  CHECK(s.dragPreview()->position.x == doctest::Approx(2));  // start 0 + 2
+
+  CHECK(s.endGizmoDrag());
+  CHECK_FALSE(s.dragging());
+  CHECK(s.station().find(id)->worldTransform.position.x == doctest::Approx(2));
+  CHECK(s.canUndo());
+}
+
+TEST_CASE("gizmo drag: snap-on-move re-links onto a neighbor") {
+  const ModuleCatalog c = twoModuleCatalog();
+  EditorState s(c);  // a_mod
+  // a_mod root at origin.
+  s.updateGhost(Vec3{0, 10, 0}, Vec3{0, -1, 0});
+  const InstanceId ida = s.commitGhost().value();
+  // b_mod free-placed away (forceFree avoids auto-snap).
+  s.cycleActive(1);
+  s.updateGhost(Vec3{100, 10, 0}, Vec3{0, -1, 0}, /*forceFree=*/true);
+  const InstanceId idb = s.commitGhost().value();
+
+  s.selectByRay(Vec3{100, 0, -10}, Vec3{0, 0, 1});
+  REQUIRE(s.selected().value() == idb);
+
+  const double scale = 5.0;
+  REQUIRE(s.beginGizmoDrag(Vec3{102, 5, 0}, Vec3{0, -1, 0}, scale));  // +X of b's gizmo
+  // Drag b toward the origin; within dragSnapRadius of a's connector -> snaps.
+  s.updateGizmoDrag(Vec3{101, 5, 0}, Vec3{0, -1, 0});
+  REQUIRE(s.endGizmoDrag());
+
+  const PlacedModule* pb = s.station().find(idb);
+  REQUIRE(pb != nullptr);
+  REQUIRE(pb->links.size() == 1);
+  CHECK(pb->links[0].otherInstanceId == ida);
+  // Reciprocal on a.
+  CHECK(s.station().find(ida)->links.size() == 1);
+}
+
+TEST_CASE("beginGizmoDrag is a no-op without a selection or a handle hit") {
+  const ModuleCatalog c = twoModuleCatalog();
+  EditorState s(c);
+  s.updateGhost(Vec3{0, 10, 0}, Vec3{0, -1, 0});
+  const InstanceId id = s.commitGhost().value();
+  // No selection yet.
+  CHECK_FALSE(s.beginGizmoDrag(Vec3{2, 5, 0}, Vec3{0, -1, 0}, 5.0));
+  // Select, but aim the ray far from any handle.
+  s.selectByRay(Vec3{0, 0, -10}, Vec3{0, 0, 1});
+  REQUIRE(s.selected().value() == id);
+  CHECK_FALSE(s.beginGizmoDrag(Vec3{500, 500, 0}, Vec3{0, -1, 0}, 5.0));
+}
+
+TEST_CASE("rotateSelected re-orients a placed module via an undoable command") {
+  const ModuleCatalog c = twoModuleCatalog();
+  EditorState s(c);
+  s.updateGhost(Vec3{0, 10, 0}, Vec3{0, -1, 0});
+  const InstanceId id = s.commitGhost().value();
+  s.selectByRay(Vec3{0, 0, -10}, Vec3{0, 0, 1});
+
+  REQUIRE(s.rotateSelected(Vec3{0, 1, 0}));  // +90 about Y
+  const Vec3 r = rotate(s.station().find(id)->worldTransform.rotation, Vec3{1, 0, 0});
+  CHECK(r.z == doctest::Approx(-1).epsilon(1e-9));
+  CHECK(s.canUndo());
+  s.undo();
+  const Vec3 r0 = rotate(s.station().find(id)->worldTransform.rotation, Vec3{1, 0, 0});
+  CHECK(r0.x == doctest::Approx(1).epsilon(1e-9));  // back to identity
+}
+
+TEST_CASE("gizmo hover: highlightHandle tracks the handle under the cursor") {
+  const ModuleCatalog c = twoModuleCatalog();
+  EditorState s(c);
+  s.updateGhost(Vec3{0, 10, 0}, Vec3{0, -1, 0});
+  const InstanceId id = s.commitGhost().value();  // module at origin
+  s.selectByRay(Vec3{0, 0, -10}, Vec3{0, 0, 1});
+  REQUIRE(s.selected().value() == id);
+
+  const double scale = 5.0;  // gizmo at origin, axisLength 5
+  s.updateGizmoHover(Vec3{2, 5, 0}, Vec3{0, -1, 0}, scale);  // down the +X axis
+  REQUIRE(s.highlightHandle().has_value());
+  CHECK(*s.highlightHandle() == GizmoHandle::AxisX);
+
+  s.updateGizmoHover(Vec3{500, 500, 0}, Vec3{0, -1, 0}, scale);  // misses every handle
+  CHECK_FALSE(s.highlightHandle().has_value());
+}
+
+TEST_CASE("gizmo drag: a rotation ring spins the module in place and commits") {
+  const ModuleCatalog c = twoModuleCatalog();
+  EditorState s(c);
+  s.updateGhost(Vec3{0, 10, 0}, Vec3{0, -1, 0});
+  const InstanceId id = s.commitGhost().value();  // module at origin
+  s.selectByRay(Vec3{0, 0, -10}, Vec3{0, 0, 1});
+  REQUIRE(s.selected().value() == id);
+
+  const double scale = 5.0;  // ringRadius 5
+  // Grab the RotY ring at a point off the axes: (3.5355, 0, 3.5355), r = 5.
+  REQUIRE(s.beginGizmoDrag(Vec3{3.5355, 5, 3.5355}, Vec3{0, -1, 0}, scale));
+  // Sweep the hit around to (5,0,0): a +45 deg rotation about +Y.
+  s.updateGizmoDrag(Vec3{5, 5, 0}, Vec3{0, -1, 0});
+  REQUIRE(s.dragPreview().has_value());
+  CHECK(s.dragPreview()->position.x == doctest::Approx(0));  // rotation in place
+  CHECK(s.dragPreview()->position.z == doctest::Approx(0));
+
+  REQUIRE(s.endGizmoDrag());  // committed despite zero position change
+  CHECK(s.canUndo());
+  // +45 deg about +Y sends +X to (cos45, 0, -sin45).
+  const Vec3 r = rotate(s.station().find(id)->worldTransform.rotation, Vec3{1, 0, 0});
+  CHECK(r.z == doctest::Approx(-0.70710678).epsilon(1e-6));
+
+  s.undo();  // rotation is undoable
+  const Vec3 r0 = rotate(s.station().find(id)->worldTransform.rotation, Vec3{1, 0, 0});
+  CHECK(r0.x == doctest::Approx(1).epsilon(1e-9));
 }
