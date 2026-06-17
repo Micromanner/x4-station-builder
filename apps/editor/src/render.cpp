@@ -125,9 +125,8 @@ void drawConnectors(const ModuleDef& def, const PlacedModule& pm, const Transfor
 }
 
 // Local-frame gizmo at the module origin so orientation is visible at a glance:
-// +X red, +Y green, +Z blue (the conventional "forward", capped with a sphere).
-// Scaled to the module, so a wrongly-rotated snap shows up as a tilted triad
-// rather than an indistinguishable box.
+// +X red, +Y green. Scaled to the module, so a wrongly-rotated snap shows up as
+// tilted axes rather than an indistinguishable box.
 void drawAxisGizmo(const ModuleDef& def, const Transform& xf) {
   const Vec3 ext = def.aabb.max - def.aabb.min;
   const double maxExt = std::max(ext.x, std::max(ext.y, ext.z));
@@ -135,9 +134,6 @@ void drawAxisGizmo(const ModuleDef& def, const Transform& xf) {
   const Vec3 o = xf.position;
   DrawLine3D(toRl(o), toRl(o + rotate(xf.rotation, Vec3{1, 0, 0}) * len), RED);
   DrawLine3D(toRl(o), toRl(o + rotate(xf.rotation, Vec3{0, 1, 0}) * len), GREEN);
-  const Vec3 fwd = o + rotate(xf.rotation, Vec3{0, 0, 1}) * len;
-  DrawLine3D(toRl(o), toRl(fwd), BLUE);
-  DrawSphere(toRl(fwd), static_cast<float>(maxExt) * 0.04f, BLUE);  // +Z forward tip
 }
 
 // Depth-precision is the near/far RATIO, not the absolute near plane: a fixed
