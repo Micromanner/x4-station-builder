@@ -29,11 +29,19 @@ struct CameraBasis {
   return {r, cross(f, r), f};  // f,r orthonormal => cross(f,r) is already unit
 }
 
+// World units spanned per screen pixel at `distance` from the eye, for vertical
+// field of view `fovyRad` and viewport height `heightPx`. The pan path multiplies
+// a pixel drag delta by this to stay zoom-invariant; it is the inverse of
+// render.cpp's projFactor (pixels per world unit).
+[[nodiscard]] inline double pixelsToWorldAtDepth(double fovyRad, double heightPx, double distance) {
+  return 2.0 * distance * std::tan(fovyRad * 0.5) / heightPx;
+}
+
 // World offset to add to the orbit target for a mouse delta of (dx, dy) pixels.
-// `scale` converts pixels->world at the pivot depth (caller supplies it as
-// 2 * distance * tan(fovy/2) / viewportHeightPx). Both axes pan the camera the
-// way the cursor moves: drag right (dx>0) slides the pivot -right, drag down
-// (dy>0) slides it -up — so the view tracks the drag, not the inverse.
+// `scale` converts pixels->world at the pivot depth (caller supplies it via
+// pixelsToWorldAtDepth). Both axes pan the camera the way the cursor moves: drag
+// right (dx>0) slides the pivot -right, drag down (dy>0) slides it -up — so the
+// view tracks the drag, not the inverse.
 [[nodiscard]] inline Vec3 panOffset(const CameraBasis& b, double dx, double dy, double scale) {
   return b.right * (-dx * scale) + b.up * (-dy * scale);
 }

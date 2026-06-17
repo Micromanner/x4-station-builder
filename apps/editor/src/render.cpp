@@ -403,8 +403,11 @@ StationBounds stationBounds(const Station& station, const ModuleCatalog& catalog
     if (def == nullptr) continue;
     box = merge(box, worldAabb(def->aabb, pm.worldTransform));
   }
-  const Vec3 center = (box.min + box.max) * 0.5;
-  return {box, center, length(box.max - box.min) * 0.5};
+  return boundsOf(box);
+}
+
+StationBounds boundsOf(const AABB& box) {
+  return {box, (box.min + box.max) * 0.5, length(box.max - box.min) * 0.5};
 }
 
 void drawScene(const EditorState& state, const ::Camera3D& camera, MeshCache& meshes,

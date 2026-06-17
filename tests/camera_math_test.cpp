@@ -37,6 +37,14 @@ TEST_CASE("panOffset slides the pivot opposite both drag axes (view tracks the c
   CHECK(vclose(panOffset(b, 0.0, 10.0, 2.0), Vec3{0, -20, 0}));
 }
 
+TEST_CASE("pixelsToWorldAtDepth is the world span per pixel at the pivot depth") {
+  // 90deg vertical FOV => tan(45deg)=1, so span = 2*distance/height.
+  const double halfPi = 1.5707963267948966;
+  CHECK(pixelsToWorldAtDepth(halfPi, 200.0, 100.0) == doctest::Approx(1.0));
+  // Linear in distance: twice as far => twice the world per pixel.
+  CHECK(pixelsToWorldAtDepth(halfPi, 200.0, 200.0) == doctest::Approx(2.0));
+}
+
 TEST_CASE("flyOffset moves along look/right/world-up and normalizes diagonals") {
   const CameraBasis b{Vec3{1, 0, 0}, Vec3{0, 1, 0}, Vec3{0, 0, -1}};
   const Vec3 up{0, 1, 0};

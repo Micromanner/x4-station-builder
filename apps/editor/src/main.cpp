@@ -31,6 +31,14 @@ namespace {
 constexpr int kScreenW = 1280;
 constexpr int kScreenH = 720;
 
+// X4-space bounds -> the display-space center + radius the camera frames. The
+// single flip + cast site shared by every F-frame focus path.
+void toFraming(const x4sb::editor::StationBounds& b, ::Vector3& centerOut, float& radiusOut) {
+  const x4sb::Vec3 d = x4sb::flipZ(b.center);  // display space
+  centerOut = ::Vector3{static_cast<float>(d.x), static_cast<float>(d.y), static_cast<float>(d.z)};
+  radiusOut = static_cast<float>(b.radius);
+}
+
 // Display-space center + radius of the whole station (for the F-frame key). An
 // empty station keeps a sane default framing.
 void stationBounds(const x4sb::EditorState& s, ::Vector3& centerOut, float& radiusOut) {
@@ -39,15 +47,11 @@ void stationBounds(const x4sb::EditorState& s, ::Vector3& centerOut, float& radi
     radiusOut = 20.0f;
     return;
   }
-  const x4sb::editor::StationBounds b = x4sb::editor::stationBounds(s.station(), s.catalog());
-  const x4sb::Vec3 d = x4sb::flipZ(b.center);  // display space
-  centerOut = ::Vector3{static_cast<float>(d.x), static_cast<float>(d.y), static_cast<float>(d.z)};
-  radiusOut = static_cast<float>(b.radius);
+  toFraming(x4sb::editor::stationBounds(s.station(), s.catalog()), centerOut, radiusOut);
 }
 
-// Display-space center + radius of the currently selected module, mirroring the
-// stationBounds wrapper's flip + radius convention. Returns false (leaving the
-// outputs untouched) when there is no resolvable selection.
+// Display-space center + radius of the currently selected module. Returns false
+// (leaving the outputs untouched) when there is no resolvable selection.
 [[nodiscard]] bool focusSelection(const x4sb::EditorState& s, ::Vector3& centerOut,
                                   float& radiusOut) {
   const std::optional<x4sb::InstanceId> sel = s.selected();
@@ -56,10 +60,8 @@ void stationBounds(const x4sb::EditorState& s, ::Vector3& centerOut, float& radi
   if (m == nullptr) return false;
   const x4sb::ModuleDef* def = s.catalog().find(m->defId);
   if (def == nullptr) return false;
-  const x4sb::AABB w = x4sb::worldAabb(def->aabb, m->worldTransform);
-  const x4sb::Vec3 d = x4sb::flipZ((w.min + w.max) * 0.5);  // display space
-  centerOut = ::Vector3{static_cast<float>(d.x), static_cast<float>(d.y), static_cast<float>(d.z)};
-  radiusOut = static_cast<float>(x4sb::length(w.max - w.min) * 0.5);
+  toFraming(x4sb::editor::boundsOf(x4sb::worldAabb(def->aabb, m->worldTransform)), centerOut,
+            radiusOut);
   return true;
 }
 

@@ -51,6 +51,11 @@ struct StationBounds {
 };
 [[nodiscard]] StationBounds stationBounds(const Station& station, const ModuleCatalog& catalog);
 
+// Bounding center + sphere radius of a single AABB (the per-AABB form of
+// StationBounds; `box` is returned unchanged). Shared by stationBounds and the
+// F-key single-selection focus so both use one center/radius convention.
+[[nodiscard]] StationBounds boundsOf(const AABB& box);
+
 // Draw the translate/rotate gizmo (axis arrows, plane quads, rotation rings) for
 // the selected module, anchored at the live drag-preview pose while dragging. The
 // dragged module's own mesh moves live (see drawScene), so no AABB-box preview is
