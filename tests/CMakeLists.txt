@@ -17,7 +17,8 @@ add_executable(x4sb_tests
   moduleindex_test.cpp
   wares_test.cpp
   catalogbuild_test.cpp
-  meshconvert_test.cpp)
+  meshconvert_test.cpp
+  camera_math_test.cpp)
 
 target_link_libraries(x4sb_tests PRIVATE
   doctest::doctest
@@ -32,5 +33,7 @@ target_link_libraries(x4sb_tests PRIVATE
   x4sb_planio
   x4sb_coords
   x4sb_platform)
+
+target_include_directories(x4sb_tests PRIVATE ${CMAKE_SOURCE_DIR}/apps/editor/src)
 
 add_test(NAME x4sb_tests COMMAND x4sb_tests)

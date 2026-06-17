@@ -45,6 +45,24 @@ void stationBounds(const x4sb::EditorState& s, ::Vector3& centerOut, float& radi
   radiusOut = static_cast<float>(b.radius);
 }
 
+// Display-space center + radius of the currently selected module, mirroring the
+// stationBounds wrapper's flip + radius convention. Returns false (leaving the
+// outputs untouched) when there is no resolvable selection.
+[[nodiscard]] bool focusSelection(const x4sb::EditorState& s, ::Vector3& centerOut,
+                                  float& radiusOut) {
+  const std::optional<x4sb::InstanceId> sel = s.selected();
+  if (!sel) return false;
+  const x4sb::PlacedModule* m = s.station().find(*sel);
+  if (m == nullptr) return false;
+  const x4sb::ModuleDef* def = s.catalog().find(m->defId);
+  if (def == nullptr) return false;
+  const x4sb::AABB w = x4sb::worldAabb(def->aabb, m->worldTransform);
+  const x4sb::Vec3 d = x4sb::flipZ((w.min + w.max) * 0.5);  // display space
+  centerOut = ::Vector3{static_cast<float>(d.x), static_cast<float>(d.y), static_cast<float>(d.z)};
+  radiusOut = static_cast<float>(x4sb::length(w.max - w.min) * 0.5);
+  return true;
+}
+
 // Error loop: catalog not found / unparseable. Show what we tried until closed.
 int runCatalogError() {
   while (!WindowShouldClose()) {
@@ -118,7 +136,7 @@ int main(int argc, char** argv) {
         if (IsKeyPressed(KEY_F)) {
           ::Vector3 c{};
           float r = 20.0f;
-          stationBounds(state, c, r);
+          if (!focusSelection(state, c, r)) stationBounds(state, c, r);
           cam.frame(c, r);
         }
         if (std::optional<std::string> msg = x4sb::editor::handlePlanIoKeys(state)) {

@@ -14,6 +14,10 @@ namespace x4sb::editor {
   return ::Vector3{static_cast<float>(v.x), static_cast<float>(v.y), static_cast<float>(v.z)};
 }
 
+[[nodiscard]] inline Vec3 toVec3(::Vector3 v) {
+  return Vec3{static_cast<double>(v.x), static_cast<double>(v.y), static_cast<double>(v.z)};
+}
+
 // Model matrix (rotation then translation) from an x4sb rigid Transform.
 [[nodiscard]] inline ::Matrix toRlMatrix(const Transform& t) {
   const ::Quaternion q{static_cast<float>(t.rotation.x), static_cast<float>(t.rotation.y),
