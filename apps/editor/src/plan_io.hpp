@@ -8,9 +8,14 @@
 
 namespace x4sb::editor {
 
+// What one frame's plan-IO key handling did.
+struct PlanIoOutcome {
+  std::optional<std::string> message;  // one-line HUD status when an action ran
+  bool reloaded{false};  // Ctrl+O loaded a new station -> caller should pre-warm its meshes
+};
+
 // Handle Ctrl+S (export station -> <profile>/constructionplan/x4sb_plan.xml +
 // clipboard) and Ctrl+O (load newest *.xml there -> EditorState) for this frame.
-// Returns a one-line HUD status when an action ran, else nullopt.
-[[nodiscard]] std::optional<std::string> handlePlanIoKeys(EditorState& state);
+[[nodiscard]] PlanIoOutcome handlePlanIoKeys(EditorState& state);
 
 }  // namespace x4sb::editor

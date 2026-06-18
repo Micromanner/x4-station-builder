@@ -17,8 +17,12 @@ namespace x4sb::editor {
 // orientation gizmos when showGizmos). When showMeshes, each module is drawn as a
 // glTF wireframe (via `meshes`), falling back to its AABB box if no mesh loads;
 // when false, always the box. BeginMode3D/EndMode3D are handled inside.
+// `lodEnabled` keeps the distance-LOD box collapse (cheap on huge stations); when
+// false every visible module draws as a full mesh (frustum culling still applies) —
+// the editor default, since a real station is meant to be seen, and mesh instancing
+// makes "all meshes" affordable.
 void drawScene(const EditorState& state, const ::Camera3D& camera, MeshCache& meshes,
-               bool showGizmos, bool showMeshes);
+               bool showGizmos, bool showMeshes, bool lodEnabled = true);
 
 // Same scene from a raw Station + catalog (no selection, no ghost) — used by the
 // --snaptest / --megashot harnesses so they render through the identical path.
@@ -26,7 +30,8 @@ void drawScene(const EditorState& state, const ::Camera3D& camera, MeshCache& me
 // `allConnectors` forces them for every module (the snap-eyeball harness wants all,
 // a big-station shot wants none).
 void drawScene(const Station& station, const ModuleCatalog& catalog, const ::Camera3D& camera,
-               MeshCache& meshes, bool showGizmos, bool showMeshes, bool allConnectors = false);
+               MeshCache& meshes, bool showGizmos, bool showMeshes, bool allConnectors = false,
+               bool lodEnabled = true);
 
 // Diagnostic: tally the per-module LOD/cull decisions for a camera without
 // drawing, reusing the exact metrics drawScene uses. Lets a headless harness

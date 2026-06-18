@@ -3,6 +3,7 @@
 // (spec §6). Pure geometry; no rendering.
 #include "x4sb/data/catalog.hpp"
 #include "x4sb/document/station.hpp"
+#include "x4sb/snap/connector_grid.hpp"
 
 #include <cstdint>
 #include <memory>
@@ -33,6 +34,16 @@ std::optional<SnapCandidate> findSnapCandidate(const ModuleDef& newDef, Vec3 cur
                                                const Station& station, const ModuleCatalog& catalog,
                                                double radius, InstanceId ignoreInstanceId = 0,
                                                std::optional<Transform> newDefTransform = std::nullopt);
+
+// Grid-accelerated equivalent of findSnapCandidate: identical result, but uses a
+// prebuilt ConnectorGrid to consider only connectors near the query point instead
+// of scanning every placed module (known-issues 1.2). `grid` must have been built
+// from the same `station`/`catalog`. `queryPoint` is the cursor world position
+// (cursor mode) or the dragged pose's position (snap-on-move; pass newDefTransform).
+[[nodiscard]] std::optional<SnapCandidate> findSnapCandidate(
+    const ModuleDef& newDef, Vec3 queryPoint, const Station& station,
+    const ModuleCatalog& catalog, const ConnectorGrid& grid, double radius,
+    InstanceId ignoreInstanceId = 0, std::optional<Transform> newDefTransform = std::nullopt);
 
 // AABB overlap test of a candidate placement against all OTHER placed modules
 // (the joint itself cannot overlap). `ignoreInstanceId` is skipped.

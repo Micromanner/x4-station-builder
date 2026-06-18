@@ -12,6 +12,7 @@
 #include "x4sb/snap/snap.hpp"
 
 #include <cstddef>
+#include <memory>
 #include <optional>
 #include <string>
 #include <vector>
@@ -69,8 +70,14 @@ class EditorState {
   [[nodiscard]] bool placementEnabled() const { return placementEnabled_; }
 
   // ── History ─────────────────────────────────────────────────────────────
-  void undo() { undo_.undo(station_); }
-  void redo() { undo_.redo(station_); }
+  void undo() {
+    undo_.undo(station_);
+    gridDirty_ = true;
+  }
+  void redo() {
+    undo_.redo(station_);
+    gridDirty_ = true;
+  }
   [[nodiscard]] bool canUndo() const { return undo_.canUndo(); }
   [[nodiscard]] bool canRedo() const { return undo_.canRedo(); }
   // Replace the document on plan load: a fresh document, so undo/redo,
@@ -116,9 +123,16 @@ class EditorState {
   [[nodiscard]] const ModuleCatalog& catalog() const { return catalog_; }
   // Resolve a module definition from the catalog this state was built with.
   [[nodiscard]] const ModuleDef* defFor(const std::string& defId) const;
+  // Broad-phase connector index for snap search and connector rendering. Built
+  // lazily and rebuilt only after a mutation (placement/move/delete/undo/redo/
+  // load) — never per frame. Logically const: the cache does not change the
+  // observable document, so it is exposed to the const renderer path.
+  [[nodiscard]] const ConnectorGrid& connectorGrid() const;
 
  private:
   [[nodiscard]] std::vector<std::string> filteredOrder() const;
+  // Single funnel for committing commands so every mutation dirties the grid.
+  void execute(std::unique_ptr<Command> cmd);
 
   const ModuleCatalog& catalog_;
   Station station_;
@@ -130,6 +144,9 @@ class EditorState {
   std::optional<Ghost> ghost_;
   Quat pendingRotation_{};   // orients the free-place ghost; reset on commit
   bool placementEnabled_{true};  // false = select mode (no ghost; clicks select)
+
+  mutable std::optional<ConnectorGrid> connectorGrid_;  // built lazily by connectorGrid()
+  mutable bool gridDirty_{true};                        // true => rebuild on next access
 
   // In-progress gizmo drag (none when not dragging).
   struct GizmoDrag {

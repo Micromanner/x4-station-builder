@@ -1,6 +1,7 @@
 #include "x4sb/snap/snap.hpp"
 
 #include "x4sb/document/commands.hpp"
+#include "x4sb/snap/connector_grid.hpp"
 #include "x4sb/snap/pick.hpp"
 
 #include <doctest/doctest.h>
@@ -388,5 +389,75 @@ TEST_CASE("findSnapCandidate uses connector-to-connector distance when newDefTra
   CHECK(hit->instanceId == ida);
   CHECK(hit->targetPointId == "a1");
   CHECK(hit->newPointId == "b1");
+}
+
+TEST_CASE("grid-backed findSnapCandidate matches brute force (cursor mode)") {
+  ModuleCatalog catalog;
+  catalog.add(makeModule("A", "a1", {0, 0, 0}));
+  const ModuleDef newDef = makeModule("B", "b1", {0, 0, 0});  // untagged -> compatible
+
+  Station station;
+  for (int i = 0; i < 200; ++i) {
+    PlacedModule pm;
+    pm.defId = "A";
+    pm.worldTransform.position = {static_cast<double>(i) * 137.0, 0, 0};
+    station.add(pm);
+  }
+  const ConnectorGrid grid(station, catalog, 1000.0);
+
+  for (double cx : {50.0, 1500.0, 9000.0, 12345.0}) {
+    const Vec3 cursor{cx, 0, 0};
+    const auto brute = findSnapCandidate(newDef, cursor, station, catalog, 1000.0);
+    const auto fast = findSnapCandidate(newDef, cursor, station, catalog, grid, 1000.0);
+    CHECK(brute.has_value() == fast.has_value());
+    if (brute && fast) {
+      CHECK(fast->instanceId == brute->instanceId);
+      CHECK(fast->targetPointId == brute->targetPointId);
+      CHECK(fast->newPointId == brute->newPointId);
+    }
+  }
+}
+
+TEST_CASE("grid-backed findSnapCandidate matches brute force (snap-on-move)") {
+  ModuleCatalog catalog;
+  catalog.add(makeModule("A", "a1", {0, 0, 0}));
+  const ModuleDef newDef = makeModule("B", "b1", {5, 0, 0});
+
+  Station station;
+  for (int i = 0; i < 100; ++i) {
+    PlacedModule pm;
+    pm.defId = "A";
+    pm.worldTransform.position = {static_cast<double>(i) * 211.0, 0, 0};
+    station.add(pm);
+  }
+  const ConnectorGrid grid(station, catalog, 1000.0);
+
+  for (double px : {3.0, 1000.0, 8000.0}) {
+    Transform newXf;
+    newXf.position = {px, 0, 0};
+    const auto brute =
+        findSnapCandidate(newDef, newXf.position, station, catalog, 300.0, 0, newXf);
+    const auto fast =
+        findSnapCandidate(newDef, newXf.position, station, catalog, grid, 300.0, 0, newXf);
+    CHECK(brute.has_value() == fast.has_value());
+    if (brute && fast) CHECK(fast->instanceId == brute->instanceId);
+  }
+}
+
+TEST_CASE("grid-backed findSnapCandidate honors ignoreInstanceId") {
+  ModuleCatalog catalog;
+  catalog.add(makeModule("A", "a1", {0, 0, 0}));
+  const ModuleDef newDef = makeModule("B", "b1", {0, 0, 0});
+
+  Station station;
+  PlacedModule pm;
+  pm.defId = "A";
+  pm.worldTransform.position = {500, 0, 0};
+  const InstanceId id = station.add(pm);
+  const ConnectorGrid grid(station, catalog, 1000.0);
+
+  CHECK(findSnapCandidate(newDef, Vec3{500, 0, 0}, station, catalog, grid, 1000.0).has_value());
+  CHECK_FALSE(
+      findSnapCandidate(newDef, Vec3{500, 0, 0}, station, catalog, grid, 1000.0, id).has_value());
 }
 

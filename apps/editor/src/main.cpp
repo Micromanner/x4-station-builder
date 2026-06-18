@@ -3,11 +3,14 @@
 // logic in libs/editorcore) and draw it. All scene geometry is in X4 native space;
 // the renderer applies the single (1,1,-1) handedness flip.
 #include "app_paths.hpp"
+#include "connbench.hpp"
 #include "gizmoshot.hpp"
 #include "input.hpp"
+#include "loadbench.hpp"
 #include "mesh_cache.hpp"
 #include "orbit_camera.hpp"
 #include "megashot.hpp"
+#include "mesh_load.hpp"
 #include "plan_io.hpp"
 #include "profile.hpp"
 #include "profiling.hpp"
@@ -100,6 +103,13 @@ int main(int argc, char** argv) {
     if (std::string(argv[i]) == "--profile" && i + 2 < argc) {
       return x4sb::editor::runProfile(std::string(argv[i + 1]), std::atoi(argv[i + 2]));
     }
+    if (std::string(argv[i]) == "--connbench" && i + 2 < argc) {
+      const double sp = (i + 3 < argc) ? std::atof(argv[i + 3]) : 0.0;
+      return x4sb::editor::runConnBench(std::atoi(argv[i + 1]), std::atoi(argv[i + 2]), sp);
+    }
+    if (std::string(argv[i]) == "--loadbench" && i + 1 < argc) {
+      return x4sb::editor::runLoadBench(std::atoi(argv[i + 1]));
+    }
     if (std::string(argv[i]) == "--rdc" && i + 1 < argc) {
       return x4sb::editor::runRdcCapture(std::string(argv[i + 1]));
     }
@@ -126,6 +136,7 @@ int main(int argc, char** argv) {
     x4sb::editor::OrbitCamera cam;
     bool showGizmos = true;
     bool showMeshes = true;  // render-only state; not in EditorState (that's render-free)
+    bool lodEnabled = false;  // editor default: show every module as a mesh (L toggles distance-LOD)
     std::string toast;
     double toastUntil = 0.0;
 
@@ -136,15 +147,23 @@ int main(int argc, char** argv) {
         x4sb::editor::handleKeys(state);
         if (IsKeyPressed(KEY_G)) showGizmos = !showGizmos;
         if (IsKeyPressed(KEY_M)) showMeshes = !showMeshes;
+        if (IsKeyPressed(KEY_L)) lodEnabled = !lodEnabled;  // distance-LOD box collapse for huge stations
         if (IsKeyPressed(KEY_F)) {
           ::Vector3 c{};
           float r = 20.0f;
           if (!focusSelection(state, c, r)) stationBounds(state, c, r);
           cam.frame(c, r);
         }
-        if (std::optional<std::string> msg = x4sb::editor::handlePlanIoKeys(state)) {
-          toast = *msg;
+        const x4sb::editor::PlanIoOutcome io = x4sb::editor::handlePlanIoKeys(state);
+        if (io.message) {
+          toast = *io.message;
           toastUntil = GetTime() + 4.0;
+        }
+        if (io.reloaded) {
+          // Editor model: upload the whole plan's meshes up front (loading screen)
+          // rather than streaming the in-view set, so there's no box pop-in and
+          // selecting/moving never hitches on a late upload (known-issues 1.3).
+          x4sb::editor::loadStationMeshes(state.station(), state.catalog(), meshes);
         }
 
         x4sb::editor::handleMouse(state, cam.camera());
@@ -152,7 +171,7 @@ int main(int argc, char** argv) {
 
       BeginDrawing();
       ClearBackground(::Color{30, 30, 38, 255});
-      x4sb::editor::drawScene(state, cam.camera(), meshes, showGizmos, showMeshes);
+      x4sb::editor::drawScene(state, cam.camera(), meshes, showGizmos, showMeshes, lodEnabled);
       x4sb::editor::drawHud(state, GetScreenWidth(), GetScreenHeight(), showGizmos);
       if (GetTime() < toastUntil) x4sb::editor::drawToast(toast, GetScreenHeight());
       EndDrawing();

@@ -40,7 +40,8 @@ std::string saveToDisk(EditorState& state) {
   return "Saved " + path.string() + " (clipboard copied)";
 }
 
-std::string loadFromDisk(EditorState& state) {
+std::string loadFromDisk(EditorState& state, bool& didLoad) {
+  didLoad = false;
   std::error_code ec;
   std::filesystem::path dir = platform::defaultConstructionPlanDir();
   if (dir.empty()) dir = std::filesystem::current_path(ec);
@@ -70,17 +71,22 @@ std::string loadFromDisk(EditorState& state) {
   if (!loaded) return "Parse FAILED: " + newest.filename().string();
 
   state.loadStation(std::move(*loaded));
+  didLoad = true;
   return "Loaded " + newest.filename().string();
 }
 
 }  // namespace
 
-std::optional<std::string> handlePlanIoKeys(EditorState& state) {
+PlanIoOutcome handlePlanIoKeys(EditorState& state) {
   const bool ctrl = IsKeyDown(KEY_LEFT_CONTROL) || IsKeyDown(KEY_RIGHT_CONTROL);
-  if (!ctrl) return std::nullopt;
-  if (IsKeyPressed(KEY_S)) return saveToDisk(state);
-  if (IsKeyPressed(KEY_O)) return loadFromDisk(state);
-  return std::nullopt;
+  if (!ctrl) return {};
+  if (IsKeyPressed(KEY_S)) return {saveToDisk(state), false};
+  if (IsKeyPressed(KEY_O)) {
+    bool loaded = false;
+    std::string msg = loadFromDisk(state, loaded);
+    return {std::move(msg), loaded};
+  }
+  return {};
 }
 
 }  // namespace x4sb::editor

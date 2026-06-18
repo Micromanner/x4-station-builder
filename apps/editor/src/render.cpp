@@ -105,54 +105,44 @@ bool drawModuleMeshes(const ModuleDef& def, const Transform& xf, MeshCache& mesh
   return true;
 }
 
+// One connector marker: a sphere at `world` plus its facing-normal stub. Colour
+// encodes free/occupied and near/far (lit). Shared by the per-module path and the
+// grid-culled path so both render identically.
+void drawOneConnector(Vec3 world, Vec3 normal, bool linked, bool lit) {
+  ::Color c;
+  if (linked) {
+    c = lit ? ::Color{120, 120, 120, 100} : ::Color{120, 120, 120, 50};
+  } else {
+    c = lit ? ORANGE : ::Color{255, 161, 0, 90};
+  }
+  DrawSphere(toRl(world), 20.0f, c);  // X4 scale: ~0.6 was sub-pixel
+  // The connector's local +Z is its facing normal. This MUST stay the same axis
+  // the snap solver mates about (snap.cpp `kMate`, spec §3.1).
+  DrawLine3D(toRl(world), toRl(world + normal * 80.0), c);  // X4 scale normal stub
+}
+
+// A connector is bright (lit) if it belongs to the selected module, if there is no
+// active ghost/selection context (tests/debug), or if it is within 1000 units of
+// the active module's AABB.
+bool connectorLit(Vec3 world, std::optional<AABB> activeAabb, bool isSelected) {
+  if (isSelected) return true;
+  if (!activeAabb) return true;
+  const Vec3 q{std::clamp(world.x, activeAabb->min.x, activeAabb->max.x),
+               std::clamp(world.y, activeAabb->min.y, activeAabb->max.y),
+               std::clamp(world.z, activeAabb->min.z, activeAabb->max.z)};
+  return length(world - q) < 1000.0;
+}
+
 // `xf` is the pose to draw at — normally pm.worldTransform, but the live drag
-// preview pose for the module being dragged, so its markers track the mesh.
-// `xf` is the pose to draw at — normally pm.worldTransform, but the live drag
-// preview pose for the module being dragged, so its markers track the mesh.
+// preview pose for the module being dragged so its markers track the mesh.
 void drawConnectors(const ModuleDef& def, const PlacedModule& pm, const Transform& xf,
                     std::optional<AABB> activeAabb = std::nullopt,
                     std::optional<InstanceId> selected = std::nullopt) {
+  const bool isSelected = selected.has_value() && *selected == pm.instanceId;
   for (const auto& cp : def.connectionPoints) {
     const Vec3 world = apply(xf, cp.localPosition);
-    const bool linked = pointIsLinked(pm, cp.id);
-    const bool isSelected = selected.has_value() && *selected == pm.instanceId;
-
-    // Determine the opacity/brightness of this connector
-    bool lit = isSelected;
-    if (!lit && activeAabb) {
-      // Calculate distance between world point and activeAabb
-      const Vec3 q{
-          std::clamp(world.x, activeAabb->min.x, activeAabb->max.x),
-          std::clamp(world.y, activeAabb->min.y, activeAabb->max.y),
-          std::clamp(world.z, activeAabb->min.z, activeAabb->max.z)
-      };
-      const double dist = length(world - q);
-      // Lights up if it is within 1000.0 units of the active AABB
-      if (dist < 1000.0) {
-        lit = true;
-      }
-    } else if (!activeAabb) {
-      // Default to fully lit if no active ghost/selection context is provided
-      // (e.g. in snap tests or when not in snapping context).
-      lit = true;
-    }
-
-    ::Color c;
-    if (linked) {
-      // Occupied connectors: dark gray, slightly brighter if lit (or always dim)
-      c = lit ? ::Color{120, 120, 120, 100} : ::Color{120, 120, 120, 50};
-    } else {
-      // Free connectors: bright orange if lit, barely visible transparent orange if not
-      c = lit ? ORANGE : ::Color{255, 161, 0, 90};
-    }
-
-    DrawSphere(toRl(world), 20.0f, c);  // X4 scale: ~0.6 was sub-pixel
-    // Draw the connector's local +Z as its facing normal. This MUST stay the
-    // same axis the snap solver mates about (snap.cpp `kMate`, spec §3.1); if
-    // that convention is corrected against real data, update this axis too, or
-    // the markers will mislead the eyeball check of a snap.
     const Vec3 n = rotate(xf.rotation * cp.localRotation, Vec3{0, 0, 1});
-    DrawLine3D(toRl(world), toRl(world + n * 80.0), c);  // X4 scale normal stub
+    drawOneConnector(world, n, pointIsLinked(pm, cp.id), connectorLit(world, activeAabb, isSelected));
   }
 }
 
@@ -319,6 +309,15 @@ struct ViewCull {
 // full detail.
 constexpr float kMeshPx = 12.0f;
 
+// Connectors farther than this from the active module are not drawn at all (at a
+// large-station camera distance a 20m marker is sub-pixel anyway). The grid query
+// pads by the active module's radius so nothing within the 1000-unit lit band of a
+// large module's surface is missed — but capped (kMaxConnectorReach) so a huge
+// module's AABB can't blow the query up to hundreds of neighbours and tank the frame
+// rate in a dense station (known-issues 1.2, big-mesh case).
+constexpr double kConnectorDrawRadius = 1000.0;
+constexpr double kMaxConnectorReach = 2500.0;
+
 // Bucket one module's drawable parts for instanced submission. Shares the boxing
 // decision with the per-module path via canRenderAsMeshes (false -> nothing bucketed,
 // caller boxes). On success each present part's model matrix is appended to its
@@ -346,7 +345,8 @@ void drawPlacedModules(const Station& station, const ModuleCatalog& catalog,
                        std::optional<InstanceId> selected, MeshCache& meshes, bool showGizmos,
                        bool showMeshes, const ::Camera3D& camera, bool allConnectors,
                        std::optional<Transform> selectedPreview,
-                       std::optional<AABB> activeAabb = std::nullopt) {
+                       std::optional<AABB> activeAabb = std::nullopt,
+                       const ConnectorGrid* grid = nullptr, bool lodEnabled = true) {
   const double projF = projFactor(camera);
   const ViewCull vc = viewCull(camera);
 
@@ -380,7 +380,7 @@ void drawPlacedModules(const Station& station, const ModuleCatalog& catalog,
       const LodMetrics lod = lodMetrics(*def, pm, camera, projF);
       if (!sel && frustumCull(lod, vc)) continue;
 
-      const bool detailed = sel || lod.pixelSize >= static_cast<double>(kMeshPx);
+      const bool detailed = sel || !lodEnabled || lod.pixelSize >= static_cast<double>(kMeshPx);
       if (!(detailed && showMeshes)) {
         boxes.emplace_back(def, &pm);
       } else if (sel) {
@@ -416,19 +416,44 @@ void drawPlacedModules(const Station& station, const ModuleCatalog& catalog,
     }
   }
 
-  // Pass 3: detail markers. Interactive editor shows them for the SELECTED module
-  // only, unless activeAabb is present (meaning a ghost or selection is active,
-  // where we show all connectors dim, lighting up when close), or allConnectors is true.
+  // Pass 3: connector markers. The selected module always shows its connectors and
+  // gizmo. Otherwise, when a ghost or selection is active, show only connectors
+  // NEAR the active module — queried from the grid instead of looping every module
+  // (the per-frame draw-call explosion behind known-issues 1.2). `allConnectors`
+  // keeps the full-station debug view.
   {
     ZoneScopedN("modules: markers");
-    const bool showAllDim = allConnectors || activeAabb.has_value();
-    for (const auto& pm : station.modules()) {
-      const bool sel = selected.has_value() && *selected == pm.instanceId;
-      if (!showAllDim && !sel) continue;
-      const ModuleDef* def = catalog.find(pm.defId);
-      if (def == nullptr) continue;
-      drawConnectors(*def, pm, xfFor(pm, sel), activeAabb, selected);
-      if (showGizmos && (sel || allConnectors)) drawAxisGizmo(*def, xfFor(pm, sel));
+    if (allConnectors) {
+      for (const auto& pm : station.modules()) {
+        const ModuleDef* def = catalog.find(pm.defId);
+        if (def == nullptr) continue;
+        const bool sel = selected.has_value() && *selected == pm.instanceId;
+        drawConnectors(*def, pm, xfFor(pm, sel), activeAabb, selected);
+        if (showGizmos) drawAxisGizmo(*def, xfFor(pm, sel));
+      }
+    } else {
+      if (selected) {
+        const PlacedModule* pm = station.find(*selected);
+        const ModuleDef* def = pm ? catalog.find(pm->defId) : nullptr;
+        if (def != nullptr) {
+          drawConnectors(*def, *pm, xfFor(*pm, true), activeAabb, selected);
+          if (showGizmos) drawAxisGizmo(*def, xfFor(*pm, true));
+        }
+      }
+      if (activeAabb && grid != nullptr) {
+        const Vec3 center = (activeAabb->min + activeAabb->max) * 0.5;
+        const double reach = std::min(
+            kConnectorDrawRadius + length(activeAabb->max - activeAabb->min) * 0.5, kMaxConnectorReach);
+        for (const ConnectorGrid::Entry& e : grid->queryRadius(center, reach)) {
+          if (selected.has_value() && e.instanceId == *selected) continue;  // drawn above
+          const PlacedModule* pm = station.find(e.instanceId);
+          const ModuleDef* def = pm ? catalog.find(pm->defId) : nullptr;
+          if (def == nullptr || e.connectorIndex >= def->connectionPoints.size()) continue;
+          const ConnectionPoint& cp = def->connectionPoints[e.connectorIndex];
+          const Vec3 n = rotate(pm->worldTransform.rotation * cp.localRotation, Vec3{0, 0, 1});
+          drawOneConnector(e.world, n, pointIsLinked(*pm, cp.id), connectorLit(e.world, activeAabb, false));
+        }
+      }
     }
   }
 }
@@ -474,8 +499,12 @@ StationBounds boundsOf(const AABB& box) {
 }
 
 void drawScene(const EditorState& state, const ::Camera3D& camera, MeshCache& meshes,
-               bool showGizmos, bool showMeshes) {
+               bool showGizmos, bool showMeshes, bool lodEnabled) {
   ZoneScoped;
+  // Reset the per-frame mesh-upload budget here, in drawScene, so EVERY render entry
+  // point (the editor loop AND the offscreen --profile/--megashot/--snaptest/--gizmoshot
+  // harnesses) gets it — none can forget and stall mesh streaming after the first frame.
+  meshes.beginFrame();
   beginScene(camera);
 
   std::optional<AABB> activeAabb;
@@ -493,8 +522,15 @@ void drawScene(const EditorState& state, const ::Camera3D& camera, MeshCache& me
     }
   }
 
+  // Neighbour connector markers are a snapping aid — only meaningful while placing a
+  // ghost or dragging. On idle selection, skip them (only the selected module's own
+  // connectors draw): a big selected module's AABB would otherwise flood the grid query
+  // with hundreds of neighbours and tank the frame rate (known-issues 1.2, big-mesh case).
+  const ConnectorGrid* connGrid =
+      (state.ghost() || state.dragging()) ? &state.connectorGrid() : nullptr;
   drawPlacedModules(state.station(), state.catalog(), state.selected(), meshes, showGizmos,
-                    showMeshes, camera, /*allConnectors=*/false, state.dragPreview(), activeAabb);
+                    showMeshes, camera, /*allConnectors=*/false, state.dragPreview(), activeAabb,
+                    connGrid, lodEnabled);
 
   // Draw proximity warning grids on build boundary faces when a module is near them
   AABB worldBox{};
@@ -727,11 +763,13 @@ void drawTranslateGizmo(const EditorState& state, const ::Camera3D& camera) {
 }
 
 void drawScene(const Station& station, const ModuleCatalog& catalog, const ::Camera3D& camera,
-               MeshCache& meshes, bool showGizmos, bool showMeshes, bool allConnectors) {
+               MeshCache& meshes, bool showGizmos, bool showMeshes, bool allConnectors,
+               bool lodEnabled) {
   ZoneScoped;
+  meshes.beginFrame();  // per-frame upload budget reset — see the EditorState drawScene overload
   beginScene(camera);
   drawPlacedModules(station, catalog, std::nullopt, meshes, showGizmos, showMeshes, camera,
-                    allConnectors, std::nullopt);
+                    allConnectors, std::nullopt, std::nullopt, nullptr, lodEnabled);
   endScene();
 }
 

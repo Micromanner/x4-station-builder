@@ -4,9 +4,11 @@ add_executable(x4sb_tests
   coords_test.cpp
   document_test.cpp
   snap_test.cpp
+  connector_grid_test.cpp
   pick_test.cpp
   display_flip_test.cpp
   editorcore_test.cpp
+  mesh_paths_test.cpp
   gizmo_test.cpp
   archive_test.cpp
   assetpipe_test.cpp

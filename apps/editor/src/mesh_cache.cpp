@@ -100,7 +100,7 @@ MeshCache::~MeshCache() {
   if (instancedShaderOk_) UnloadShader(instancedShader_);
 }
 
-const ::Model* MeshCache::get(const std::string& gltfPath) {
+const ::Model* MeshCache::tryLoad(const std::string& gltfPath, bool budgeted) {
   const auto it = cache_.find(gltfPath);
   if (it != cache_.end()) return it->second.has_value() ? &it->second.value() : nullptr;
 
@@ -113,6 +113,16 @@ const ::Model* MeshCache::get(const std::string& gltfPath) {
     TraceLog(LOG_WARNING, "MeshCache: missing %s", full.string().c_str());
     cache_.emplace(gltfPath, std::nullopt);
     return nullptr;
+  }
+
+  // get() (the per-frame path) defers when the frame's upload budget is spent:
+  // return nullptr WITHOUT caching so the caller boxes the module for now and we
+  // retry next frame — distinct from a genuine failure below, which negative-caches
+  // and never retries. warm() (the loading-screen pre-upload) passes budgeted=false
+  // to upload regardless. (known-issues 1.3)
+  if (budgeted) {
+    if (uploadsThisFrame_ >= kUploadsPerFrame) return nullptr;
+    ++uploadsThisFrame_;
   }
 
   ::Model m = LoadModel(full.string().c_str());
@@ -145,6 +155,14 @@ const ::Model* MeshCache::get(const std::string& gltfPath) {
 
   const auto inserted = cache_.emplace(gltfPath, std::move(m)).first;
   return &inserted->second.value();
+}
+
+const ::Model* MeshCache::get(const std::string& gltfPath) {
+  return tryLoad(gltfPath, /*budgeted=*/true);
+}
+
+const ::Model* MeshCache::warm(const std::string& gltfPath) {
+  return tryLoad(gltfPath, /*budgeted=*/false);
 }
 
 void MeshCache::drawInstanced(const std::string& gltfPath, const std::vector<::Matrix>& xforms,

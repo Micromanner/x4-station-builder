@@ -7,10 +7,13 @@ add_executable(x4sb-editor
   src/render.cpp
   src/input.cpp
   src/mesh_cache.cpp
+  src/mesh_load.cpp
   src/snaptest.cpp
   src/megashot.cpp
   src/gizmoshot.cpp
   src/profile.cpp
+  src/connbench.cpp
+  src/loadbench.cpp
   src/rdc_api.cpp
   src/rdc_capture.cpp
   src/plan_io.cpp

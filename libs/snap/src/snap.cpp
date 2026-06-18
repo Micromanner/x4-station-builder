@@ -102,6 +102,72 @@ std::optional<SnapCandidate> findSnapCandidate(const ModuleDef& newDef, Vec3 cur
   return best;
 }
 
+std::optional<SnapCandidate> findSnapCandidate(const ModuleDef& newDef, Vec3 queryPoint,
+                                               const Station& station, const ModuleCatalog& catalog,
+                                               const ConnectorGrid& grid, double radius,
+                                               InstanceId ignoreInstanceId,
+                                               std::optional<Transform> newDefTransform) {
+  // Equivalence to the brute-force findSnapCandidate is "same nearest distance", not a
+  // byte-identical result: on an EXACT distance tie the grid (cell-iteration order) and
+  // the brute force (station order) can pick different but equally-valid candidates.
+  // Ties are measure-zero on real float poses and unspecified by spec §6.
+  std::optional<SnapCandidate> best;
+  double bestDist = radius;
+
+  // Resolve a grid entry to its (placed module, connection point), applying the
+  // same skips as the brute-force search. Returns false if it should be ignored.
+  const auto resolve = [&](const ConnectorGrid::Entry& e, const PlacedModule*& placedOut,
+                           const ConnectionPoint*& cpOut) -> bool {
+    if (e.instanceId == ignoreInstanceId) return false;
+    const PlacedModule* placed = station.find(e.instanceId);
+    if (placed == nullptr) return false;
+    const ModuleDef* def = catalog.find(placed->defId);
+    if (def == nullptr || e.connectorIndex >= def->connectionPoints.size()) return false;
+    const ConnectionPoint& cp = def->connectionPoints[e.connectorIndex];
+    if (pointIsLinked(*placed, cp.id)) return false;
+    placedOut = placed;
+    cpOut = &cp;
+    return true;
+  };
+
+  if (newDefTransform) {
+    // Snap-on-move: nearest compatible connector-to-connector pair. Query the grid
+    // around each of the new module's connectors (N is small).
+    for (const auto& np : newDef.connectionPoints) {
+      const Vec3 newWorld = apply(*newDefTransform, np.localPosition);
+      for (const ConnectorGrid::Entry& e : grid.queryRadius(newWorld, radius)) {
+        const PlacedModule* placed = nullptr;
+        const ConnectionPoint* cp = nullptr;
+        if (!resolve(e, placed, cp)) continue;
+        if (!compatible(*cp, np)) continue;
+        const double dist = length(e.world - newWorld);
+        if (dist < bestDist) {
+          bestDist = dist;
+          best = SnapCandidate{placed->instanceId, cp->id, np.id};
+        }
+      }
+    }
+    return best;
+  }
+
+  // Cursor mode: nearest target connector to the cursor that has any compatible
+  // connector on the new module.
+  for (const ConnectorGrid::Entry& e : grid.queryRadius(queryPoint, radius)) {
+    const PlacedModule* placed = nullptr;
+    const ConnectionPoint* cp = nullptr;
+    if (!resolve(e, placed, cp)) continue;
+    const double dist = length(e.world - queryPoint);
+    if (dist > bestDist) continue;
+    for (const auto& np : newDef.connectionPoints) {
+      if (!compatible(*cp, np)) continue;
+      bestDist = dist;
+      best = SnapCandidate{placed->instanceId, cp->id, np.id};
+      break;
+    }
+  }
+  return best;
+}
+
 bool collidesWithStation(const ModuleDef& def, const Transform& worldTransform,
                          InstanceId ignoreInstanceId, const Station& station,
                          const ModuleCatalog& catalog) {

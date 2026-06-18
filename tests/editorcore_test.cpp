@@ -382,6 +382,31 @@ TEST_CASE("gizmo drag: a rotation ring spins the module in place and commits") {
   CHECK(r0.x == doctest::Approx(1).epsilon(1e-9));
 }
 
+TEST_CASE("EditorState rebuilds the connector grid after a placement") {
+  ModuleCatalog catalog;
+  ModuleDef a;
+  a.id = "A";
+  ConnectionPoint cp;
+  cp.id = "a1";
+  cp.localPosition = {0, 0, 0};
+  a.connectionPoints.push_back(cp);
+  catalog.add(a);
+
+  EditorState state(catalog);
+
+  // Free-place one module (forceFree skips the ray-pick snap path).
+  state.updateGhost(Vec3{0, 0, 0}, Vec3{0, 0, 1}, /*forceFree=*/true);
+  REQUIRE(state.ghost().has_value());
+  REQUIRE(state.commitGhost().has_value());
+  const std::size_t afterFirst = state.connectorGrid().size();
+  CHECK(afterFirst == 1);
+
+  // A second placement must dirty + rebuild the grid (not return the cached size).
+  state.updateGhost(Vec3{0, 0, 0}, Vec3{0, 0, 1}, /*forceFree=*/true);
+  REQUIRE(state.commitGhost().has_value());
+  CHECK(state.connectorGrid().size() == afterFirst + 1);
+}
+
 TEST_CASE("plot boundary box validation constraints") {
   const ModuleCatalog c = twoModuleCatalog();
   EditorState s(c);

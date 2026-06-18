@@ -46,6 +46,19 @@ EditorState::EditorState(const ModuleCatalog& catalog) : catalog_(catalog) {
   std::sort(order_.begin(), order_.end());
 }
 
+void EditorState::execute(std::unique_ptr<Command> cmd) {
+  undo_.execute(station_, std::move(cmd));
+  gridDirty_ = true;
+}
+
+const ConnectorGrid& EditorState::connectorGrid() const {
+  if (gridDirty_ || !connectorGrid_) {
+    connectorGrid_.emplace(station_, catalog_, snapRadius_);
+    gridDirty_ = false;
+  }
+  return *connectorGrid_;
+}
+
 std::vector<std::string> EditorState::filteredOrder() const {
   if (!filter_) return order_;
   std::vector<std::string> out;
@@ -103,7 +116,7 @@ void EditorState::updateGhost(Vec3 rayOriginX4, Vec3 rayDirX4, bool forceFree) {
         if (t) {
           const Vec3 cursor = rayOriginX4 + rayDirX4 * (*t);
           const std::optional<SnapCandidate> cand =
-              findSnapCandidate(*def, cursor, station_, catalog_, snapRadius_);
+              findSnapCandidate(*def, cursor, station_, catalog_, connectorGrid(), snapRadius_);
           if (cand) {
             const Transform xf = computeSnapTransform(station_, catalog_, cand->instanceId,
                                                       cand->targetPointId, *def, cand->newPointId);
@@ -143,7 +156,7 @@ std::optional<InstanceId> EditorState::commitGhost() {
   } else {
     cmd = std::make_unique<PlaceModuleCommand>(g.defId, g.worldTransform);
   }
-  undo_.execute(station_, std::move(cmd));
+  execute(std::move(cmd));
   ghost_.reset();
   pendingRotation_ = Quat{};  // spec §5: rotation resets on commit
   if (station_.modules().empty()) return std::nullopt;
@@ -158,6 +171,7 @@ void EditorState::loadStation(Station station) {
   selected_.reset();
   ghost_.reset();
   placementEnabled_ = true;  // fresh document starts in build mode
+  gridDirty_ = true;
 }
 
 std::optional<InstanceId> EditorState::selectByRay(Vec3 rayOriginX4, Vec3 rayDirX4) {
@@ -167,7 +181,7 @@ std::optional<InstanceId> EditorState::selectByRay(Vec3 rayOriginX4, Vec3 rayDir
 
 bool EditorState::deleteSelected() {
   if (!selected_) return false;
-  undo_.execute(station_, std::make_unique<DeleteModuleCommand>(*selected_));
+  execute(std::make_unique<DeleteModuleCommand>(*selected_));
   selected_.reset();
   return true;
 }
@@ -229,8 +243,9 @@ void EditorState::updateGizmoDrag(Vec3 rayOriginX4, Vec3 rayDirX4, bool forceFre
   drag_->preview = freePose;
 
   if (!forceFree) {
-    const std::optional<SnapCandidate> cand = findSnapCandidate(
-        *def, freePose.position, station_, catalog_, dragSnapRadius_, drag_->id, freePose);
+    const std::optional<SnapCandidate> cand =
+        findSnapCandidate(*def, freePose.position, station_, catalog_, connectorGrid(),
+                          dragSnapRadius_, drag_->id, freePose);
     if (cand) {
       drag_->snap = cand;
       drag_->preview = computeSnapTransform(station_, catalog_, cand->instanceId,
@@ -254,9 +269,8 @@ bool EditorState::endGizmoDrag() {
   }
 
   if (d.snap) {
-    undo_.execute(station_, std::make_unique<SnapMoveCommand>(
-                                d.id, d.preview, d.snap->instanceId, d.snap->newPointId,
-                                d.snap->targetPointId));
+    execute(std::make_unique<SnapMoveCommand>(d.id, d.preview, d.snap->instanceId,
+                                             d.snap->newPointId, d.snap->targetPointId));
     return true;
   }
   // Commit if the pose actually changed in position OR orientation — a rotation
@@ -267,7 +281,7 @@ bool EditorState::endGizmoDrag() {
   const double qdot = std::abs(qp.w * qs.w + qp.x * qs.x + qp.y * qs.y + qp.z * qs.z);
   const bool changed = length(moved) > 1e-9 || qdot < 1.0 - 1e-9;
   if (!changed) return false;  // a click, not a drag
-  undo_.execute(station_, std::make_unique<MoveModuleCommand>(d.id, d.preview));
+  execute(std::make_unique<MoveModuleCommand>(d.id, d.preview));
   return true;
 }
 
@@ -286,7 +300,7 @@ bool EditorState::rotateSelected(Vec3 worldAxis) {
   if (def) {
     t = clampToPlot(def->aabb, t);
   }
-  undo_.execute(station_, std::make_unique<MoveModuleCommand>(*selected_, t));
+  execute(std::make_unique<MoveModuleCommand>(*selected_, t));
   return true;
 }
 

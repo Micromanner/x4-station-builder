@@ -31,6 +31,17 @@ class MeshCache {
   // lifetime of the cache (unordered_map node addresses are stable).
   [[nodiscard]] const ::Model* get(const std::string& gltfPath);
 
+  // Like get() but ignores the per-frame upload budget — used by the loading-screen
+  // pre-upload so the whole plan's meshes are resident before interactive mode (an
+  // editor loads up front rather than streaming the in-view set). (known-issues 1.3)
+  const ::Model* warm(const std::string& gltfPath);
+
+  // Reset the per-frame GPU-upload budget. Call once at the top of each frame.
+  // Spreads the post-import LoadModel burst across frames so no single frame
+  // stalls (known-issues 1.3): get() performs at most kUploadsPerFrame uploads
+  // per frame, deferring the rest (which render as their box until loaded).
+  void beginFrame() { uploadsThisFrame_ = 0; }
+
   // True if `gltfPath` was rejected for exceeding raylib's 16-bit mesh-index
   // limit (>65535 vertices -> truncated indices -> garbage triangles). Valid only
   // after get(gltfPath) has been called (get() populates the verdict). Lets the
@@ -49,9 +60,16 @@ class MeshCache {
                      ::Color tint);
 
  private:
+  // Shared body of get()/warm(): cache lookup, missing-file negative-cache, the
+  // optional per-frame budget gate (budgeted=true), then LoadModel + validation.
+  const ::Model* tryLoad(const std::string& gltfPath, bool budgeted);
+
   std::filesystem::path root_;
   std::unordered_map<std::string, std::optional<::Model>> cache_;  // nullopt = known-missing
   std::unordered_set<std::string> oversized_;  // rejected: > 65535 verts (u16 index limit)
+  // Max LoadModel (GPU upload) calls allowed per frame. Tunable after profiling.
+  static constexpr int kUploadsPerFrame = 4;
+  int uploadsThisFrame_{0};
   // Flat-shading shader (derivative-based face normals + two-sided Lambert), shared
   // by every loaded model's material so solid modules read as 3D, not flat blobs.
   ::Shader flatShader_{};
