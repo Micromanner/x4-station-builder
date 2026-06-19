@@ -7,6 +7,14 @@
 #include <cmath>
 
 namespace x4sb::editor {
+namespace {
+// Wheel-out / frame() dolly limit: how far the eye can pull back from its pivot.
+constexpr float kMaxDistance = 17000.0f;
+// The cube the pivot (look-at point) may be panned/flown within — comfortably larger
+// than the ~20km plot so the eye can still center on any plot point when fully zoomed
+// out. With kMaxDistance this caps the eye at ~39km from center.
+constexpr float kPivotClamp = 22100.0f;
+}  // namespace
 
 OrbitCamera::OrbitCamera() {
   cam_.up = ::Vector3{0.0f, 1.0f, 0.0f};
@@ -15,7 +23,7 @@ OrbitCamera::OrbitCamera() {
   rebuild();
 }
 
-void OrbitCamera::update() {
+void OrbitCamera::update(std::optional<Vec3> zoomFocus) {
   if (IsMouseButtonDown(MOUSE_BUTTON_RIGHT)) {
     const ::Vector2 d = GetMouseDelta();
     yaw_ -= d.x * 0.005f;
@@ -38,8 +46,8 @@ void OrbitCamera::update() {
   const bool flying = flyFwd != 0.0 || flyStrafe != 0.0 || flyRise != 0.0;
   if (!panning && wheel == 0.0f && !flying) return;  // no movable-pivot gesture this frame
 
-  // The camera basis is invariant under pan/zoom/fly (they translate the pivot
-  // but never change yaw/pitch), so derive it once and share it across them.
+  // The camera basis is invariant under pan and fly (they translate the pivot but
+  // never change yaw/pitch), so derive it once and share it across them.
   const CameraBasis basis =
       cameraBasis(toVec3(cam_.target) - toVec3(cam_.position), Vec3{0.0, 1.0, 0.0});
 
@@ -56,11 +64,16 @@ void OrbitCamera::update() {
   }
 
   if (wheel != 0.0f) {
-    const ::Ray r = GetScreenToWorldRay(GetMousePosition(), cam_);
-    const double k = 1.0 - static_cast<double>(wheel) * 0.1;
-    const ZoomResult z =
-        zoomTowardCursor(toVec3(target_), static_cast<double>(distance_), basis.forward,
-                         toVec3(r.position), toVec3(r.direction), k, 2.0, 40000.0);
+    // Symmetric factor so equal in/out notches return to the same distance (the old
+    // 1 - wheel*0.1 made 0.9*1.1 = 0.99, a slow drift); pow also handles fractional
+    // / high-resolution wheel deltas correctly.
+    const double k = std::pow(0.9, static_cast<double>(wheel));
+    // Dolly toward the scene point under the cursor when the shell found one; over
+    // empty space (focus == pivot) this degrades to a plain dolly that leaves the
+    // pivot put, instead of drifting it cursor-ward across the void.
+    const Vec3 focus = zoomFocus.value_or(toVec3(target_));
+    const ZoomResult z = zoomTowardPoint(toVec3(target_), static_cast<double>(distance_), focus, k,
+                                         2.0, static_cast<double>(kMaxDistance));
     target_ = toRl(z.target);
     distance_ = static_cast<float>(z.distance);
     rebuild();
@@ -82,16 +95,16 @@ void OrbitCamera::update() {
 
 void OrbitCamera::frame(::Vector3 target, float radius) {
   target_ = target;
-  distance_ = std::clamp(radius * 2.5f, 5.0f, 40000.0f);
+  distance_ = std::clamp(radius * 2.5f, 5.0f, kMaxDistance);
   rebuild();
 }
 
 void OrbitCamera::rebuild() {
-  // Clamp movement target to +/- 52km (12km box margin + 40km max zoom) so that
-  // the camera position can fly anywhere within the plot even when fully zoomed out.
-  target_.x = std::clamp(target_.x, -52000.0f, 52000.0f);
-  target_.y = std::clamp(target_.y, -52000.0f, 52000.0f);
-  target_.z = std::clamp(target_.z, -52000.0f, 52000.0f);
+  // Clamp the pivot to the kPivotClamp cube so the eye can reach the plot edges even
+  // when fully zoomed out (see the constant for the sizing rationale).
+  target_.x = std::clamp(target_.x, -kPivotClamp, kPivotClamp);
+  target_.y = std::clamp(target_.y, -kPivotClamp, kPivotClamp);
+  target_.z = std::clamp(target_.z, -kPivotClamp, kPivotClamp);
 
   const float cp = std::cos(pitch_);
   cam_.position = ::Vector3{target_.x + distance_ * cp * std::sin(yaw_),

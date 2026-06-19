@@ -83,4 +83,17 @@ struct ZoomResult {
   return {focal + (target - focal) * effK, newDistance};
 }
 
+// Dolly toward an explicit world `focus` point, keeping it fixed on screen: the
+// pivot migrates toward it by the effective factor (newDistance/distance) so the
+// clamp can't drift the focus. Unlike zoomTowardCursor this takes the focal point
+// directly (the shell hit-tests the scene under the cursor), so passing focus ==
+// target yields a plain dolly with the pivot unchanged — the over-empty-space case,
+// which avoids the cursor-ward pivot drift the ray-plane approximation produced.
+[[nodiscard]] inline ZoomResult zoomTowardPoint(Vec3 target, double distance, Vec3 focus, double k,
+                                                double minDistance, double maxDistance) {
+  const double newDistance = std::clamp(distance * k, minDistance, maxDistance);
+  const double effK = distance > 0.0 ? newDistance / distance : 1.0;
+  return {focus + (target - focus) * effK, newDistance};
+}
+
 }  // namespace x4sb::editor

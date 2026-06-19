@@ -21,6 +21,20 @@ void mouseRayX4(const ::Camera3D& camera, Vec3& originOut, Vec3& dirOut) {
   dirOut = flipZ(Vec3{r.direction.x, r.direction.y, r.direction.z});
 }
 
+std::optional<Vec3> zoomFocusUnderCursor(const EditorState& state, const ::Camera3D& camera) {
+  Vec3 ro{};
+  Vec3 rd{};
+  mouseRayX4(camera, ro, rd);  // rd is unit length, so the AABB t is a world distance
+  const std::optional<InstanceId> hit = pickModule(state.station(), state.catalog(), ro, rd);
+  if (!hit) return std::nullopt;  // empty space under the cursor -> caller does a plain dolly
+  const PlacedModule* pm = state.station().find(*hit);
+  const ModuleDef* def = pm != nullptr ? state.catalog().find(pm->defId) : nullptr;
+  if (def == nullptr) return std::nullopt;
+  const std::optional<double> t = rayIntersectsAabb(ro, rd, worldAabb(def->aabb, pm->worldTransform));
+  if (!t) return std::nullopt;
+  return flipZ(ro + rd * *t);  // X4 hit point -> display space (the camera's space)
+}
+
 void handleKeys(EditorState& state) {
   if (IsKeyPressed(KEY_LEFT_BRACKET)) state.cycleActive(-1);
   if (IsKeyPressed(KEY_RIGHT_BRACKET)) state.cycleActive(1);
@@ -111,11 +125,9 @@ void handleMouse(EditorState& state, const ::Camera3D& camera) {
   Vec3 rd{};
   mouseRayX4(camera, ro, rd);
 
-  // Free placement floats the ghost at the camera's orbit distance (the look-at
-  // depth) along the cursor ray — a view-facing standoff, so mouse up/down moves
-  // the ghost up/down on screen instead of near/far across a ground plane.
-  const float orbit = Vector3Distance(camera.position, camera.target);
-  state.setPlaceDistance(orbit > 1.0F ? static_cast<double>(orbit) : 1.0);
+  // Note: the free-place standoff (placeDistance) is owned by the shell now — it
+  // captures the orbit distance once on entering build mode and holds it, so zooming
+  // no longer drags the ghost in/out (it used to be re-set from orbit distance here).
 
   // Ghost preview only when not dragging (a drag owns the selection's pose).
   if (!state.dragging()) state.updateGhost(ro, rd, alt || shift);

@@ -91,3 +91,28 @@ TEST_CASE("zoomTowardCursor falls back to a plain dolly at a grazing angle") {
   CHECK(r.distance == doctest::Approx(50.0));
   CHECK(vclose(r.target, target, 1e-6));  // pivot unchanged on the grazing fallback
 }
+
+TEST_CASE("zoomTowardPoint keeps the explicit focus fixed and clamps distance") {
+  const Vec3 target{0, 0, -100};
+  const Vec3 focus{10, 0, -100};
+  const ZoomResult r = zoomTowardPoint(target, 100.0, focus, 0.5, 2.0, 1000000.0);
+  CHECK(r.distance == doctest::Approx(50.0));
+  // newTarget = focus + (target-focus)*0.5 = (5,0,-100).
+  CHECK(vclose(r.target, Vec3{5, 0, -100}, 1e-6));
+}
+
+TEST_CASE("zoomTowardPoint with focus == target is a plain dolly (pivot unchanged)") {
+  const Vec3 target{3, 4, -100};
+  const ZoomResult r = zoomTowardPoint(target, 100.0, target, 0.5, 2.0, 1000000.0);
+  CHECK(r.distance == doctest::Approx(50.0));
+  CHECK(vclose(r.target, target, 1e-6));  // over-empty-space case: no cursor-ward drift
+}
+
+TEST_CASE("zoomTowardPoint clamps to maxDistance and stops focus migration there") {
+  const Vec3 target{0, 0, -100};
+  const Vec3 focus{10, 0, -100};
+  // k=2 (zoom out) but already at the max => distance pinned, effK=1, pivot unmoved.
+  const ZoomResult r = zoomTowardPoint(target, 100.0, focus, 2.0, 2.0, 100.0);
+  CHECK(r.distance == doctest::Approx(100.0));
+  CHECK(vclose(r.target, target, 1e-6));
+}

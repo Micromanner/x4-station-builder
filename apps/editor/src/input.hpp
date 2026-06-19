@@ -6,10 +6,18 @@
 
 #include "raylib.h"
 
+#include <optional>
+
 namespace x4sb::editor {
 
 // Build the mouse-ray in X4 space (raylib ray flipped by negating Z).
 void mouseRayX4(const ::Camera3D& camera, Vec3& originOut, Vec3& dirOut);
+
+// Display-space scene point under the cursor (nearest module-AABB hit), or nullopt
+// over empty space. The shell feeds it to OrbitCamera::update so the wheel zooms
+// toward what you point at and plain-dollies over the void (no cursor-ward drift).
+[[nodiscard]] std::optional<Vec3> zoomFocusUnderCursor(const EditorState& state,
+                                                       const ::Camera3D& camera);
 
 // Apply keyboard shortcuts (cycle/filter/delete/undo/redo/rotate) for this frame.
 void handleKeys(EditorState& state);

@@ -64,8 +64,9 @@ class EditorState {
 
   // The free-place ghost floats this far in front of the camera along the cursor
   // ray — a view-facing standoff, NOT a ground-plane projection, so vertical mouse
-  // motion moves the ghost up/down on screen instead of near/far. The shell sets it
-  // to the camera's orbit distance each frame; the default is a headless-test value.
+  // motion moves the ghost up/down on screen instead of near/far. The shell captures
+  // this from the orbit distance when build mode is entered and then holds it, so
+  // zooming doesn't drag the ghost in/out; the default is a headless-test value.
   void setPlaceDistance(double distance) { placeDistance_ = distance; }
   // Placement (build) mode vs. select mode. When disabled there is no ghost, so a
   // left-click selects an existing module instead of placing a new one — letting
@@ -217,8 +218,8 @@ class EditorState {
   // at the module extents, so the nearest free connector to a ray's box-surface
   // hit point can be ~1000+ away — 50 was far too small to ever snap.
   double snapRadius_{1000.0};
-  // View-facing standoff for free placement (see setPlaceDistance). The shell
-  // overrides this with the camera orbit distance; 10.0 is the headless default.
+  // View-facing standoff for free placement (see setPlaceDistance). The shell sets
+  // this to a stable baseline on build-mode entry; 10.0 is the headless default.
   double placeDistance_{10.0};
 };
 

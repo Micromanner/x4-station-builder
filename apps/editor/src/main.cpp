@@ -141,6 +141,9 @@ int main(int argc, char** argv) {
   {
     x4sb::editor::MeshCache meshes{std::filesystem::path(*catalogPath).parent_path()};
     x4sb::editor::OrbitCamera cam;
+    // Free-place standoff baseline: captured from the orbit distance now and on each
+    // build-mode entry (below), then held — so zooming never drags the ghost in/out.
+    state.setPlaceDistance(cam.distance());
     bool showGizmos = true;
     bool showMeshes = true;  // render-only state; not in EditorState (that's render-free)
     bool lodEnabled = false;  // editor default: show every module as a mesh (L toggles distance-LOD)
@@ -150,8 +153,17 @@ int main(int argc, char** argv) {
     while (!WindowShouldClose()) {
       {
         ZoneScopedN("input+update");
-        cam.update();
+        // Zoom toward the scene point under the cursor (plain dolly over empty
+        // space); the hit-test runs only on wheel frames.
+        std::optional<x4sb::Vec3> zoomFocus;
+        if (GetMouseWheelMove() != 0.0f)
+          zoomFocus = x4sb::editor::zoomFocusUnderCursor(state, cam.camera());
+        cam.update(zoomFocus);
         x4sb::editor::handleKeys(state);
+        // Re-baseline the free-place standoff when Q enters build mode, so a fresh
+        // ghost sits at the current view depth (handleKeys already toggled the mode).
+        if (IsKeyPressed(KEY_Q) && state.placementEnabled())
+          state.setPlaceDistance(cam.distance());
         if (IsKeyPressed(KEY_G)) showGizmos = !showGizmos;
         if (IsKeyPressed(KEY_M)) showMeshes = !showMeshes;
         if (IsKeyPressed(KEY_L)) lodEnabled = !lodEnabled;  // distance-LOD box collapse for huge stations
