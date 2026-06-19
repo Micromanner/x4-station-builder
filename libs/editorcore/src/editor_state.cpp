@@ -97,6 +97,12 @@ void EditorState::setFilter(std::optional<Category> cat) {
   activeIndex_ = 0;
 }
 
+bool EditorState::placementClear(const ModuleDef& def, const Transform& xf, InstanceId ignoreA,
+                                 InstanceId ignoreB) const {
+  return (allowOverlap_ || !collidesWithStation(def, xf, ignoreA, ignoreB, station_, catalog_)) &&
+         !collidesClearance(def, xf, ignoreA, ignoreB, station_, catalog_);
+}
+
 void EditorState::updateGhost(Vec3 rayOriginX4, Vec3 rayDirX4, bool forceFree) {
   ghost_.reset();
   if (!placementEnabled_) return;  // select mode: no ghost, so clicks select
@@ -121,12 +127,7 @@ void EditorState::updateGhost(Vec3 rayOriginX4, Vec3 rayDirX4, bool forceFree) {
             const Transform xf = computeSnapTransform(station_, catalog_, cand->instanceId,
                                                       cand->targetPointId, *def, cand->newPointId);
             const AABB snapWorldBox = worldAabb(def->aabb, xf);
-            // Clearance is always enforced regardless of allowOverlap_ — confirmed
-            // in-game: the "Allow Module Overlap" toggle only relaxes body AABBs,
-            // not dock/cradle flight corridors.
-            const bool clear =
-                (allowOverlap_ || !collidesWithStation(*def, xf, cand->instanceId, station_, catalog_)) &&
-                !collidesClearance(*def, xf, cand->instanceId, 0, station_, catalog_);
+            const bool clear = placementClear(*def, xf, cand->instanceId, 0);
             ghost_ = Ghost{def->id, xf, isInsidePlot(snapWorldBox) && clear, cand};
             return;
           }
@@ -145,10 +146,7 @@ void EditorState::updateGhost(Vec3 rayOriginX4, Vec3 rayDirX4, bool forceFree) {
   xf.rotation = pendingRotation_;
   xf = clampToPlot(def->aabb, xf);
   const AABB worldBox = worldAabb(def->aabb, xf);
-  // Same clearance-always rule as the snap path (see comment above).
-  const bool clear =
-      (allowOverlap_ || !collidesWithStation(*def, xf, 0, station_, catalog_)) &&
-      !collidesClearance(*def, xf, 0, 0, station_, catalog_);
+  const bool clear = placementClear(*def, xf, 0, 0);
   ghost_ = Ghost{def->id, xf, isInsidePlot(worldBox) && clear, std::nullopt};
 }
 
@@ -278,12 +276,7 @@ bool EditorState::endGizmoDrag() {
       return false;
     }
     const InstanceId partner = d.snap ? d.snap->instanceId : 0;
-    // Body overlap is togglable; clearance (dock/cradle corridor) always blocks.
-    const bool bodyBlocked =
-        !allowOverlap_ && collidesWithStation(*def, d.preview, d.id, partner, station_, catalog_);
-    const bool clearanceBlocked =
-        collidesClearance(*def, d.preview, d.id, partner, station_, catalog_);
-    if (bodyBlocked || clearanceBlocked) {
+    if (!placementClear(*def, d.preview, d.id, partner)) {
       return false;
     }
   }

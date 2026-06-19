@@ -166,6 +166,12 @@ class EditorState {
   [[nodiscard]] std::vector<std::string> filteredOrder() const;
   // Single funnel for committing commands so every mutation dirties the grid.
   void execute(std::unique_ptr<Command> cmd);
+  // Placement validity for a candidate body at `xf`: body overlap is bypassable
+  // via allowOverlap_, but dock/cradle clearance corridors always block (verified
+  // in-game — "Allow Module Overlap" relaxes body AABBs only). `ignoreA`/`ignoreB`
+  // skip the moved module and its snap partner; either may be 0.
+  [[nodiscard]] bool placementClear(const ModuleDef& def, const Transform& xf, InstanceId ignoreA,
+                                    InstanceId ignoreB) const;
 
   const ModuleCatalog& catalog_;
   Station station_;

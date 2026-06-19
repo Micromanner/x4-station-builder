@@ -57,6 +57,11 @@ const char* categoryName(Category c) {
 constexpr ::Color kBoxFill{86, 112, 150, 255};
 constexpr ::Color kBoxEdge{150, 188, 230, 255};
 
+// Clearance-corridor tints: red = a body intrudes (blocked), green = clear. Shared by
+// the placed-corridor pass and the ghost's own-corridor draw so they stay in sync.
+constexpr ::Color kClearanceRed{230, 90, 90, 255};
+constexpr ::Color kClearanceGreen{120, 230, 140, 255};
+
 // Draw a box for `def`'s local AABB under `xf`, nested in the current matrix.
 void drawModuleBox(const ModuleDef& def, const Transform& xf, ::Color fill, ::Color edge) {
   const Vec3 center = (def.aabb.min + def.aabb.max) * 0.5;
@@ -734,30 +739,32 @@ void drawScene(const EditorState& state, const ::Camera3D& camera, MeshCache& me
 
   {
     ZoneScopedN("iact: clearance");
-    const ::Color kRed{230, 90, 90, 255};
-    const ::Color kGreen{120, 230, 140, 255};
     const ::Color kInfo{90, 180, 220, 200};  // neutral "show all" corridor
     const std::optional<InstanceId> sel = state.selected();
     const bool showAll = state.showAllClearance();
-    for (const PlacedModule& m : state.station().modules()) {
-      const ModuleDef* mdef = state.defFor(m.defId);
-      if (mdef == nullptr || mdef->clearanceVolumes.empty()) continue;
-      const bool isSelected = sel.has_value() && *sel == m.instanceId;
-      const bool selBlocked =
-          isSelected && collidesClearance(*mdef, m.worldTransform, m.instanceId, 0, state.station(),
-                                          state.catalog());
-      for (std::size_t i = 0; i < mdef->clearanceVolumes.size(); ++i) {
-        ::Color col{};
-        if (isRevealed(m.instanceId, i)) {
-          col = kRed;
-        } else if (isSelected) {
-          col = selBlocked ? kRed : kGreen;
-        } else if (showAll) {
-          col = kInfo;
-        } else {
-          continue;  // not selected, not intruded, show-all off -> hidden
+    // Nothing can draw without a reveal, a selection, or show-all — skip the whole
+    // per-frame station walk (and its per-module catalog lookups) in the idle case.
+    if (showAll || sel.has_value() || !revealed.empty()) {
+      for (const PlacedModule& m : state.station().modules()) {
+        const ModuleDef* mdef = state.defFor(m.defId);
+        if (mdef == nullptr || mdef->clearanceVolumes.empty()) continue;
+        const bool isSelected = sel.has_value() && *sel == m.instanceId;
+        const bool selBlocked =
+            isSelected && collidesClearance(*mdef, m.worldTransform, m.instanceId, 0,
+                                            state.station(), state.catalog());
+        for (std::size_t i = 0; i < mdef->clearanceVolumes.size(); ++i) {
+          ::Color col{};
+          if (isRevealed(m.instanceId, i)) {
+            col = kClearanceRed;
+          } else if (isSelected) {
+            col = selBlocked ? kClearanceRed : kClearanceGreen;
+          } else if (showAll) {
+            col = kInfo;
+          } else {
+            continue;  // not selected, not intruded, show-all off -> hidden
+          }
+          drawClearanceVolume(mdef->clearanceVolumes[i], m.worldTransform, col);
         }
-        drawClearanceVolume(mdef->clearanceVolumes[i], m.worldTransform, col);
       }
     }
   }
@@ -775,8 +782,7 @@ void drawScene(const EditorState& state, const ::Camera3D& camera, MeshCache& me
       rlDisableBackfaceCulling();
       if (!drew) drawModuleBox(*gdef, state.ghost()->worldTransform, fill, edge);
       if (!gdef->clearanceVolumes.empty()) {
-        const ::Color col = state.ghost()->valid ? ::Color{120, 230, 140, 255}
-                                                 : ::Color{230, 90, 90, 255};
+        const ::Color col = state.ghost()->valid ? kClearanceGreen : kClearanceRed;
         for (const ClearanceVolume& cv : gdef->clearanceVolumes)
           drawClearanceVolume(cv, state.ghost()->worldTransform, col);
       }
