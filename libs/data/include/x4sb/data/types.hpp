@@ -51,7 +51,13 @@ struct ModuleDef {
   std::vector<ConnectionPoint> connectionPoints;
   std::vector<MeshRef> meshRefs;
   std::vector<ClearanceVolume> clearanceVolumes;  // dock/cradle clear volumes (design §3.1)
-  AABB aabb{};  // derived bounding box, in module-local space
+  AABB aabb{};                                    // derived bounding box, in module-local space
 };
+
+// Player-facing label: the localized name when present, else the macro id. Name
+// is empty for unresolved refs or catalogs built before the localization pass.
+[[nodiscard]] inline const std::string& displayName(const ModuleDef& m) {
+  return m.name.empty() ? m.id : m.name;
+}
 
 }  // namespace x4sb

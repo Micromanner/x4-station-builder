@@ -5,7 +5,6 @@
 #include "profiling.hpp"
 #include "raylib_convert.hpp"
 #include "rlgl.h"
-
 #include "x4sb/data/types.hpp"
 #include "x4sb/editorcore/display_flip.hpp"
 #include "x4sb/editorcore/gizmo.hpp"
@@ -40,13 +39,20 @@ bool meshRefIsStructural(const std::string& gltfPath) {
 
 const char* categoryName(Category c) {
   switch (c) {
-    case Category::Production: return "Production";
-    case Category::Storage: return "Storage";
-    case Category::Habitat: return "Habitat";
-    case Category::Dock: return "Dock";
-    case Category::Defense: return "Defense";
-    case Category::Connector: return "Connector";
-    case Category::Other: return "Other";
+    case Category::Production:
+      return "Production";
+    case Category::Storage:
+      return "Storage";
+    case Category::Habitat:
+      return "Habitat";
+    case Category::Dock:
+      return "Dock";
+    case Category::Defense:
+      return "Defense";
+    case Category::Connector:
+      return "Connector";
+    case Category::Other:
+      return "Other";
   }
   return "?";
 }
@@ -233,7 +239,8 @@ void drawConnectors(const ModuleDef& def, const PlacedModule& pm, const Transfor
   for (const auto& cp : def.connectionPoints) {
     const Vec3 world = apply(xf, cp.localPosition);
     const Vec3 n = rotate(xf.rotation * cp.localRotation, Vec3{0, 0, 1});
-    drawOneConnector(world, n, pointIsLinked(pm, cp.id), connectorLit(world, activeAabb, isSelected));
+    drawOneConnector(world, n, pointIsLinked(pm, cp.id),
+                     connectorLit(world, activeAabb, isSelected));
   }
 }
 
@@ -271,26 +278,26 @@ void drawDottedLine(::Vector3 start, ::Vector3 end, ::Color color) {
 }
 
 void drawPlotDottedEdges() {
-  constexpr float h = 10000.0f; // Half size
-  const ::Color edgeColor{34, 187, 255, 60}; // Faint Cherenkov blue for the dotted edges
-  
+  constexpr float h = 10000.0f;               // Half size
+  const ::Color edgeColor{34, 187, 255, 60};  // Faint Cherenkov blue for the dotted edges
+
   // 4 edges along X
   drawDottedLine(::Vector3{-h, -h, -h}, ::Vector3{h, -h, -h}, edgeColor);
-  drawDottedLine(::Vector3{-h, -h,  h}, ::Vector3{h, -h,  h}, edgeColor);
-  drawDottedLine(::Vector3{-h,  h, -h}, ::Vector3{h,  h, -h}, edgeColor);
-  drawDottedLine(::Vector3{-h,  h,  h}, ::Vector3{h,  h,  h}, edgeColor);
+  drawDottedLine(::Vector3{-h, -h, h}, ::Vector3{h, -h, h}, edgeColor);
+  drawDottedLine(::Vector3{-h, h, -h}, ::Vector3{h, h, -h}, edgeColor);
+  drawDottedLine(::Vector3{-h, h, h}, ::Vector3{h, h, h}, edgeColor);
 
   // 4 edges along Y
   drawDottedLine(::Vector3{-h, -h, -h}, ::Vector3{-h, h, -h}, edgeColor);
-  drawDottedLine(::Vector3{-h, -h,  h}, ::Vector3{-h, h,  h}, edgeColor);
-  drawDottedLine(::Vector3{ h, -h, -h}, ::Vector3{ h, h, -h}, edgeColor);
-  drawDottedLine(::Vector3{ h, -h,  h}, ::Vector3{ h, h,  h}, edgeColor);
+  drawDottedLine(::Vector3{-h, -h, h}, ::Vector3{-h, h, h}, edgeColor);
+  drawDottedLine(::Vector3{h, -h, -h}, ::Vector3{h, h, -h}, edgeColor);
+  drawDottedLine(::Vector3{h, -h, h}, ::Vector3{h, h, h}, edgeColor);
 
   // 4 edges along Z
   drawDottedLine(::Vector3{-h, -h, -h}, ::Vector3{-h, -h, h}, edgeColor);
-  drawDottedLine(::Vector3{-h,  h, -h}, ::Vector3{-h,  h, h}, edgeColor);
-  drawDottedLine(::Vector3{ h, -h, -h}, ::Vector3{ h, -h, h}, edgeColor);
-  drawDottedLine(::Vector3{ h,  h, -h}, ::Vector3{ h,  h, h}, edgeColor);
+  drawDottedLine(::Vector3{-h, h, -h}, ::Vector3{-h, h, h}, edgeColor);
+  drawDottedLine(::Vector3{h, -h, -h}, ::Vector3{h, -h, h}, edgeColor);
+  drawDottedLine(::Vector3{h, h, -h}, ::Vector3{h, h, h}, edgeColor);
 }
 
 void beginScene(const ::Camera3D& camera) {
@@ -514,8 +521,9 @@ void drawPlacedModules(const Station& station, const ModuleCatalog& catalog,
       }
       if (activeAabb && grid != nullptr) {
         const Vec3 center = (activeAabb->min + activeAabb->max) * 0.5;
-        const double reach = std::min(
-            kConnectorDrawRadius + length(activeAabb->max - activeAabb->min) * 0.5, kMaxConnectorReach);
+        const double reach =
+            std::min(kConnectorDrawRadius + length(activeAabb->max - activeAabb->min) * 0.5,
+                     kMaxConnectorReach);
         for (const ConnectorGrid::Entry& e : grid->queryRadius(center, reach)) {
           if (selected.has_value() && e.instanceId == *selected) continue;  // drawn above
           const PlacedModule* pm = station.find(e.instanceId);
@@ -523,7 +531,8 @@ void drawPlacedModules(const Station& station, const ModuleCatalog& catalog,
           if (def == nullptr || e.connectorIndex >= def->connectionPoints.size()) continue;
           const ConnectionPoint& cp = def->connectionPoints[e.connectorIndex];
           const Vec3 n = rotate(pm->worldTransform.rotation * cp.localRotation, Vec3{0, 0, 1});
-          drawOneConnector(e.world, n, pointIsLinked(*pm, cp.id), connectorLit(e.world, activeAabb, false));
+          drawOneConnector(e.world, n, pointIsLinked(*pm, cp.id),
+                           connectorLit(e.world, activeAabb, false));
         }
       }
     }
@@ -664,17 +673,17 @@ void drawScene(const EditorState& state, const ::Camera3D& camera, MeshCache& me
         double offset = -gridHalfSize + i * stepSize;
         Vec3 p1{}, p2{}, q1{}, q2{};
 
-        if (axis == 0) { // X plane
+        if (axis == 0) {  // X plane
           p1 = {value, uVal + offset, vVal - gridHalfSize};
           p2 = {value, uVal + offset, vVal + gridHalfSize};
           q1 = {value, uVal - gridHalfSize, vVal + offset};
           q2 = {value, uVal + gridHalfSize, vVal + offset};
-        } else if (axis == 1) { // Y plane
+        } else if (axis == 1) {  // Y plane
           p1 = {uVal + offset, value, vVal - gridHalfSize};
           p2 = {uVal + offset, value, vVal + gridHalfSize};
           q1 = {uVal - gridHalfSize, value, vVal + offset};
           q2 = {uVal + gridHalfSize, value, vVal + offset};
-        } else { // Z plane
+        } else {  // Z plane
           p1 = {uVal + offset, vVal - gridHalfSize, value};
           p2 = {uVal + offset, vVal + gridHalfSize, value};
           q1 = {uVal - gridHalfSize, vVal + offset, value};
@@ -688,7 +697,7 @@ void drawScene(const EditorState& state, const ::Camera3D& camera, MeshCache& me
 
     constexpr double kPlotLimit = 10000.0;
     constexpr double kThresh = 250.0;
-    const ::Color normalColor{34, 187, 255, 180}; // Cherenkov Blue
+    const ::Color normalColor{34, 187, 255, 180};  // Cherenkov Blue
     const ::Color gridColor = normalColor;
 
     // Check proximity to X planes (+/- 10000) using AABB bounds
@@ -773,8 +782,7 @@ void drawScene(const EditorState& state, const ::Camera3D& camera, MeshCache& me
     ZoneScopedN("iact: ghost+clearance");
     const ModuleDef* gdef = state.defFor(state.ghost()->defId);
     if (gdef != nullptr) {
-      const ::Color fill =
-          state.ghost()->valid ? ::Color{0, 220, 0, 90} : ::Color{220, 0, 0, 90};
+      const ::Color fill = state.ghost()->valid ? ::Color{0, 220, 0, 90} : ::Color{220, 0, 0, 90};
       const ::Color edge = state.ghost()->valid ? GREEN : RED;
       rlEnableBackfaceCulling();
       const bool drew =
@@ -875,7 +883,8 @@ void drawGizmo(const EditorState& state, const ::Camera3D& camera) {
 
     // Center free-translate handle: semi-transparent sphere so it no longer blocks
     // the part origin (was a solid white ball).
-    const ::Color centerCol = (hl && *hl == GizmoHandle::Center) ? kHi : ::Color{255, 255, 255, 120};
+    const ::Color centerCol =
+        (hl && *hl == GizmoHandle::Center) ? kHi : ::Color{255, 255, 255, 120};
     DrawSphere(o, static_cast<float>(g.centerPickRadius), centerCol);
   } else {
     // Rotation rings: one clean circle per axis, in the plane normal to that axis.
@@ -920,7 +929,7 @@ void drawHud(const EditorState& state, int screenWidth, int /*screenHeight*/, bo
 
   if (state.placementEnabled()) {
     std::snprintf(line, sizeof(line), "BUILD  Active: %s",
-                  def != nullptr ? def->id.c_str() : "(none)");
+                  def != nullptr ? displayName(*def).c_str() : "(none)");
     DrawText(line, 12, 10, 20, RAYWHITE);
   } else {
     DrawText("SELECT  (Q to build)  -  click a placed module to select it", 12, 10, 20, GOLD);
@@ -933,16 +942,18 @@ void drawHud(const EditorState& state, int screenWidth, int /*screenHeight*/, bo
 
   std::snprintf(line, sizeof(line),
                 "Placed: %zu    Undo:%s  Redo:%s    Gizmos:%s    Overlap:%s    Corridors:%s",
-                state.station().size(), state.canUndo() ? "on" : "-",
-                state.canRedo() ? "on" : "-", showGizmos ? "on" : "off",
-                state.allowOverlap() ? "ON" : "off", state.showAllClearance() ? "ON" : "off");
+                state.station().size(), state.canUndo() ? "on" : "-", state.canRedo() ? "on" : "-",
+                showGizmos ? "on" : "off", state.allowOverlap() ? "ON" : "off",
+                state.showAllClearance() ? "ON" : "off");
   DrawText(line, 12, 56, 16, LIGHTGRAY);
 
   DrawText(
       "[ / ]=cycle  1=Prod 2=Stor 3=Hab 4=Dock 5=Def 6=Conn 7=Other  0=all  G=gizmos  M=mesh/box",
       12, 78, 14, GRAY);
   DrawText(
-      "LMB=place/select/drag-gizmo   Q=build/select   T/Y=move/rotate gizmo   R/Shift+R/Ctrl+R=rotate   O=overlap   C=corridors   Alt=free   Del/X=delete   Ctrl+Z/Y=undo/redo   RMB=orbit   wheel=zoom   F=frame",
+      "LMB=place/select/drag-gizmo   Q=build/select   T/Y=move/rotate gizmo   "
+      "R/Shift+R/Ctrl+R=rotate   O=overlap   C=corridors   Alt=free   Del/X=delete   "
+      "Ctrl+Z/Y=undo/redo   RMB=orbit   wheel=zoom   F=frame",
       12, 96, 14, GRAY);
 
   DrawFPS(screenWidth - 90, 10);

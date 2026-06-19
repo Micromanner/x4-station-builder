@@ -7,6 +7,7 @@ add_executable(x4sb_tests
   connector_grid_test.cpp
   pick_test.cpp
   display_flip_test.cpp
+  display_name_test.cpp
   editorcore_test.cpp
   mesh_paths_test.cpp
   gizmo_test.cpp
@@ -20,6 +21,7 @@ add_executable(x4sb_tests
   platform_test.cpp
   moduleindex_test.cpp
   wares_test.cpp
+  localization_test.cpp
   catalogbuild_test.cpp
   meshconvert_test.cpp
   camera_math_test.cpp)

@@ -2,8 +2,8 @@
 
 #include "modulewalk.hpp"
 #include "strutil.hpp"
-
 #include "x4sb/assetpipe/component.hpp"
+#include "x4sb/assetpipe/localization.hpp"
 #include "x4sb/assetpipe/moduleindex.hpp"
 #include "x4sb/assetpipe/wares.hpp"
 
@@ -15,8 +15,7 @@ namespace x4sb {
 
 namespace detail {
 
-void forEachResolvedModule(const ExtractFn& extract,
-                           const std::vector<std::string>& sourcePrefixes,
+void forEachResolvedModule(const ExtractFn& extract, const std::vector<std::string>& sourcePrefixes,
                            const std::function<void(const ResolvedModule&)>& visit,
                            std::vector<std::string>& skipped) {
   // Accumulate wares and merge the macro/component indexes across the base game
@@ -42,10 +41,11 @@ void forEachResolvedModule(const ExtractFn& extract,
   // Resolve a referenced component's geometry folder for xref parts (cached: pier
   // modules instance the same sub-assembly many times). Shared across all visits.
   std::unordered_map<std::string, std::optional<std::string>> folderCache;
-  const auto resolveFolder =
-      [&compIdx, &extract, &folderCache](const std::string& component) -> std::optional<std::string> {
+  const auto resolveFolder = [&compIdx, &extract, &folderCache](
+                                 const std::string& component) -> std::optional<std::string> {
     const std::string key = detail::toLower(component);
-    if (const auto cached = folderCache.find(key); cached != folderCache.end()) return cached->second;
+    if (const auto cached = folderCache.find(key); cached != folderCache.end())
+      return cached->second;
     std::optional<std::string> folder;
     if (const auto it = compIdx.find(key); it != compIdx.end()) {
       if (const std::optional<std::string> xml = extract(it->second)) {
@@ -93,7 +93,8 @@ void forEachResolvedModule(const ExtractFn& extract,
     rm.macro = &mi;
     rm.resolveComponentFolder = resolveFolder;
     rm.macroXml = *macroXml;
-    rm.resolveMacroXml = [&macroIdx, &extract](const std::string& name) -> std::optional<std::string> {
+    rm.resolveMacroXml = [&macroIdx,
+                          &extract](const std::string& name) -> std::optional<std::string> {
       const auto it = macroIdx.find(detail::toLower(name));
       if (it == macroIdx.end()) return std::nullopt;
       return extract(it->second);
@@ -111,13 +112,25 @@ std::string meshGltfPath(const std::string& moduleId, const std::string& partNam
 CatalogBuildResult buildModuleCatalog(const ExtractFn& extract,
                                       const std::vector<std::string>& sourcePrefixes) {
   CatalogBuildResult res;
+
+  // Merge the English localization across base + every DLC overlay (later wins).
+  TextDatabase text;
+  for (const std::string& prefix : sourcePrefixes)
+    if (const std::optional<std::string> xml = extract(prefix + "t/0001-l044.xml"))
+      text.merge(*xml);
+
   detail::forEachResolvedModule(
       extract, sourcePrefixes,
-      [&res](const detail::ResolvedModule& rm) {
+      [&res, &text](const detail::ResolvedModule& rm) {
         ModuleDef d;
         d.id = rm.id;
         d.wareId = rm.ware->wareId;
         d.nameRef = rm.ware->nameRef;
+        d.name = text.resolveRef(d.nameRef).value_or("");
+        if (d.name.empty())
+          ++res.namesUnresolved;
+        else
+          ++res.namesResolved;
         d.faction = rm.macro->makerRace;
         d.category = rm.macro->category;
         d.playerBuildable = rm.ware->playerBuildable;
@@ -131,7 +144,8 @@ CatalogBuildResult buildModuleCatalog(const ExtractFn& extract,
           mr.localTransform = p.offset;
           d.meshRefs.push_back(std::move(mr));
         }
-        d.clearanceVolumes = extractClearanceVolumes(rm.macroXml, rm.componentXml, rm.resolveMacroXml);
+        d.clearanceVolumes =
+            extractClearanceVolumes(rm.macroXml, rm.componentXml, rm.resolveMacroXml);
         res.modules.push_back(std::move(d));
       },
       res.skipped);

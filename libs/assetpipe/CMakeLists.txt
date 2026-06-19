@@ -4,6 +4,7 @@ add_library(x4sb_assetpipe STATIC
   src/catalogbuild.cpp
   src/meshconvert.cpp
   src/component.cpp
+  src/localization.cpp
   src/moduleindex.cpp
   src/wares.cpp
   src/xmf.cpp

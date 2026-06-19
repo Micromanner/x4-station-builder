@@ -49,6 +49,10 @@ ExtractFn makeFakeInstall() {
       </connections>
     </component>
   </components>)";
+  (*files)["t/0001-l044.xml"] = R"(<language id="44">
+    <page id="20104"><t id="13401">(Food Rations comment){20202,101} Food Rations</t></page>
+    <page id="20202"><t id="101">Argon</t></page>
+  </language>)";
   return [files](const std::string& path) -> std::optional<std::string> {
     const auto it = files->find(path);
     if (it == files->end()) return std::nullopt;
@@ -91,18 +95,26 @@ ExtractFn makeMultiSourceInstall() {
   (*files)["libraries/wares.xml"] = R"(<wares>
     <ware id="module_arg_prod_01" name="{1,1}" tags="module"><component ref="prod_arg_macro"/></ware>
   </wares>)";
-  (*files)["index/macros.xml"] = R"(<index><entry name="prod_arg_macro" value="m/prod_arg_macro"/></index>)";
-  (*files)["index/components.xml"] = R"(<index><entry name="prod_arg" value="c/prod_arg"/></index>)";
-  (*files)["m/prod_arg_macro.xml"] = R"(<macros><macro name="prod_arg_macro" class="production"><component ref="prod_arg"/><properties><identification makerrace="argon"/></properties></macro></macros>)";
-  (*files)["c/prod_arg.xml"] = R"(<components><component name="prod_arg"><connections><connection name="s" tags="snap"><offset><position x="0" y="0" z="1"/></offset></connection></connections></component></components>)";
+  (*files)["index/macros.xml"] =
+      R"(<index><entry name="prod_arg_macro" value="m/prod_arg_macro"/></index>)";
+  (*files)["index/components.xml"] =
+      R"(<index><entry name="prod_arg" value="c/prod_arg"/></index>)";
+  (*files)["m/prod_arg_macro.xml"] =
+      R"(<macros><macro name="prod_arg_macro" class="production"><component ref="prod_arg"/><properties><identification makerrace="argon"/></properties></macro></macros>)";
+  (*files)["c/prod_arg.xml"] =
+      R"(<components><component name="prod_arg"><connections><connection name="s" tags="snap"><offset><position x="0" y="0" z="1"/></offset></connection></connections></component></components>)";
   // DLC overlay (prefix extensions/ego_dlc_test/)
   (*files)["extensions/ego_dlc_test/libraries/wares.xml"] = R"(<diff><add sel="/wares">
     <ware id="module_bor_prod_01" name="{2,2}" tags="module"><component ref="prod_bor_macro"/></ware>
   </add></diff>)";
-  (*files)["extensions/ego_dlc_test/index/macros.xml"] = R"(<index><entry name="prod_bor_macro" value="extensions\ego_dlc_test\m\prod_bor_macro"/></index>)";
-  (*files)["extensions/ego_dlc_test/index/components.xml"] = R"(<index><entry name="prod_bor" value="extensions\ego_dlc_test\c\prod_bor"/></index>)";
-  (*files)["extensions/ego_dlc_test/m/prod_bor_macro.xml"] = R"(<macros><macro name="prod_bor_macro" class="production"><component ref="prod_bor"/><properties><identification makerrace="boron"/></properties></macro></macros>)";
-  (*files)["extensions/ego_dlc_test/c/prod_bor.xml"] = R"(<components><component name="prod_bor"><connections><connection name="s" tags="snap"><offset/></connection></connections></component></components>)";
+  (*files)["extensions/ego_dlc_test/index/macros.xml"] =
+      R"(<index><entry name="prod_bor_macro" value="extensions\ego_dlc_test\m\prod_bor_macro"/></index>)";
+  (*files)["extensions/ego_dlc_test/index/components.xml"] =
+      R"(<index><entry name="prod_bor" value="extensions\ego_dlc_test\c\prod_bor"/></index>)";
+  (*files)["extensions/ego_dlc_test/m/prod_bor_macro.xml"] =
+      R"(<macros><macro name="prod_bor_macro" class="production"><component ref="prod_bor"/><properties><identification makerrace="boron"/></properties></macro></macros>)";
+  (*files)["extensions/ego_dlc_test/c/prod_bor.xml"] =
+      R"(<components><component name="prod_bor"><connections><connection name="s" tags="snap"><offset/></connection></connections></component></components>)";
   return [files](const std::string& path) -> std::optional<std::string> {
     const auto it = files->find(path);
     if (it == files->end()) return std::nullopt;
@@ -198,6 +210,24 @@ TEST_CASE("buildModuleCatalog merges base and DLC overlays") {
     if (m.id == "prod_arg_macro") arg = &m;
   }
   REQUIRE(arg != nullptr);
-  REQUIRE(bor != nullptr);          // the DLC module resolved via the merged overlay index
-  CHECK(bor->faction == "boron");   // identity came from the DLC macro XML
+  REQUIRE(bor != nullptr);         // the DLC module resolved via the merged overlay index
+  CHECK(bor->faction == "boron");  // identity came from the DLC macro XML
+}
+
+TEST_CASE("buildModuleCatalog resolves the localized module name") {
+  const CatalogBuildResult res = buildModuleCatalog(makeFakeInstall(), {""});
+  REQUIRE(res.modules.size() == 1);
+  CHECK(res.modules[0].name == "Argon Food Rations");
+  CHECK(res.namesResolved == 1);
+  CHECK(res.namesUnresolved == 0);
+}
+
+TEST_CASE("buildModuleCatalog leaves name empty when no localization file is present") {
+  // makeMultiSourceInstall ships no t/0001-l044.xml.
+  const CatalogBuildResult res =
+      buildModuleCatalog(makeMultiSourceInstall(), {"", "extensions/ego_dlc_test/"});
+  REQUIRE(res.modules.size() == 2);
+  for (const ModuleDef& m : res.modules) CHECK(m.name.empty());
+  CHECK(res.namesResolved == 0);
+  CHECK(res.namesUnresolved == 2);
 }

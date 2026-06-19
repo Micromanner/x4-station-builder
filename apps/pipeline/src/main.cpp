@@ -130,8 +130,8 @@ int run(const std::string& x4Path, const std::string& outDir, const std::string&
         (fs::path(outDir) / (flatten(componentPath) + "__assembled.gltf")).string();
     if (writeGltfFile(assembled, asmPath))
       std::cout << "assembled module: " << assembled.positions.size() << " verts, "
-                << assembled.indices.size() / 3 << " tris -> " << fs::path(asmPath).filename().string()
-                << "\n";
+                << assembled.indices.size() / 3 << " tris -> "
+                << fs::path(asmPath).filename().string() << "\n";
   }
 
   std::cout << "\nconverted " << converted << "/" << geo.parts.size() << " parts, " << totalVerts
@@ -163,6 +163,8 @@ int runCatalog(const std::string& x4Path, const std::string& outDir) {
   }
 
   std::cout << "wrote " << res.modules.size() << " modules -> " << outPath << "\n";
+  std::cout << "localized names: " << res.namesResolved << " resolved, " << res.namesUnresolved
+            << " unresolved (fall back to macro id)\n";
   if (!res.skipped.empty()) {
     std::cout << "skipped " << res.skipped.size() << " modules:\n";
     for (const std::string& s : res.skipped) std::cout << "  " << s << "\n";
