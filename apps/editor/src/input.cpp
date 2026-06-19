@@ -79,20 +79,15 @@ double gizmoScaleFor(const ::Camera3D& camera, const EditorState& state) {
   if (!state.selected()) return kDefault;
   const PlacedModule* m = state.station().find(*state.selected());
   if (m == nullptr) return kDefault;
-  // Camera-space depth to the module gives a constant on-screen size; the module's OWN
-  // Euclidean eye distance is the collapse floor (NOT the orbit distance, which would make
-  // the size track the zoom pivot). The math lives in editorcore::gizmoScale, shared with
-  // the hit-test path.
+  // Gather editorcore::gizmoScale's inputs from the raylib camera: camera-space depth
+  // (constant on-screen size) and the module's own eye distance (the collapse floor).
   const ::Vector3 mp = toRl(flipZ(m->worldTransform.position));  // display space
   const ::Vector3 fwd = Vector3Normalize(Vector3Subtract(camera.target, camera.position));
   const double depth =
       static_cast<double>(Vector3DotProduct(Vector3Subtract(mp, camera.position), fwd));
   const double dist = static_cast<double>(Vector3Distance(camera.position, mp));
-  // Cap the handle to the module's own size so it isn't swallowed by a constant-pixel handle
-  // when the part is small/far (zoomed out) — past the cap it shrinks with the part. The cap
-  // is module-relative (not a fixed world constant) because X4 parts span tiny connectors to
-  // km-scale hulls. kMaxModuleRadii is a pure visual tuning knob (how many bounding-sphere
-  // radii the arms may reach before they stop growing).
+  // Cap the arms to ~1.5x the module's bounding-sphere radius (module-relative, since X4
+  // parts span tiny connectors to km-scale hulls) so a small/far part isn't swallowed.
   constexpr double kMaxModuleRadii = 1.5;
   const ModuleDef* def = state.catalog().find(m->defId);
   const double maxScale = def != nullptr

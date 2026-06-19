@@ -23,19 +23,19 @@ const ConnectionPoint* findPoint(const ModuleDef& def, const std::string& id) {
 // kMate here (and the tests' axis literals + render.cpp's connector-normal axis).
 const Quat kMate{0.0, 0.0, 1.0, 0.0};  // 180deg about local Y (validated)
 
-bool pointIsLinked(const PlacedModule& m, const std::string& pointId) {
+}  // namespace
+
+// Compatible if either side is untagged, or the tags match. The real compatibility
+// rule comes from the component XML (spec §5/§10.3).
+bool connectorsCompatible(const ConnectionPoint& a, const ConnectionPoint& b) {
+  return a.type.empty() || b.type.empty() || a.type == b.type;
+}
+
+bool connectorIsLinked(const PlacedModule& m, const std::string& pointId) {
   for (const auto& l : m.links)
     if (l.thisPointId == pointId) return true;
   return false;
 }
-
-// Compatible if either side is untagged, or the tags match. The real
-// compatibility rule comes from the component XML (spec §5/§10.3).
-bool compatible(const ConnectionPoint& a, const ConnectionPoint& b) {
-  return a.type.empty() || b.type.empty() || a.type == b.type;
-}
-
-}  // namespace
 
 Transform computeSnapTransform(const Station& station, const ModuleCatalog& catalog,
                                InstanceId targetInstanceId, const std::string& targetPointId,
@@ -72,13 +72,13 @@ std::optional<SnapCandidate> findSnapCandidate(const ModuleDef& newDef, Vec3 cur
     const ModuleDef* def = catalog.find(placed.defId);
     if (!def) continue;
     for (const auto& cp : def->connectionPoints) {
-      if (pointIsLinked(placed, cp.id)) continue;
+      if (connectorIsLinked(placed, cp.id)) continue;
       const Vec3 world = apply(placed.worldTransform, cp.localPosition);
 
       if (newDefTransform) {
         // Connector-to-connector distance comparison for dragging/snap-on-move
         for (const auto& np : newDef.connectionPoints) {
-          if (!compatible(cp, np)) continue;
+          if (!connectorsCompatible(cp, np)) continue;
           const Vec3 newWorld = apply(*newDefTransform, np.localPosition);
           const double dist = length(world - newWorld);
           if (dist < bestDist) {
@@ -91,7 +91,7 @@ std::optional<SnapCandidate> findSnapCandidate(const ModuleDef& newDef, Vec3 cur
         const double dist = length(world - cursorWorldPos);
         if (dist > bestDist) continue;
         for (const auto& np : newDef.connectionPoints) {
-          if (!compatible(cp, np)) continue;
+          if (!connectorsCompatible(cp, np)) continue;
           bestDist = dist;
           best = SnapCandidate{placed.instanceId, cp.id, np.id};
           break;
@@ -124,7 +124,7 @@ std::optional<SnapCandidate> findSnapCandidate(const ModuleDef& newDef, Vec3 que
     const ModuleDef* def = catalog.find(placed->defId);
     if (def == nullptr || e.connectorIndex >= def->connectionPoints.size()) return false;
     const ConnectionPoint& cp = def->connectionPoints[e.connectorIndex];
-    if (pointIsLinked(*placed, cp.id)) return false;
+    if (connectorIsLinked(*placed, cp.id)) return false;
     placedOut = placed;
     cpOut = &cp;
     return true;
@@ -139,7 +139,7 @@ std::optional<SnapCandidate> findSnapCandidate(const ModuleDef& newDef, Vec3 que
         const PlacedModule* placed = nullptr;
         const ConnectionPoint* cp = nullptr;
         if (!resolve(e, placed, cp)) continue;
-        if (!compatible(*cp, np)) continue;
+        if (!connectorsCompatible(*cp, np)) continue;
         const double dist = length(e.world - newWorld);
         if (dist < bestDist) {
           bestDist = dist;
@@ -159,7 +159,7 @@ std::optional<SnapCandidate> findSnapCandidate(const ModuleDef& newDef, Vec3 que
     const double dist = length(e.world - queryPoint);
     if (dist > bestDist) continue;
     for (const auto& np : newDef.connectionPoints) {
-      if (!compatible(*cp, np)) continue;
+      if (!connectorsCompatible(*cp, np)) continue;
       bestDist = dist;
       best = SnapCandidate{placed->instanceId, cp->id, np.id};
       break;

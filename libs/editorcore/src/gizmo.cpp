@@ -97,21 +97,12 @@ GizmoModel gizmoModel(Vec3 origin, double scale) {
 }
 
 double gizmoScale(double depthToModule, double distanceToModule, double maxScale) {
-  // Constant on-screen size = a fixed fraction of the camera-space depth to the module:
-  // depth*screenFactor projects to the same pixels at any zoom (the perspective divide
-  // cancels). Floor the depth at a fraction of the module's OWN Euclidean eye distance so
-  // the handle can't collapse off-axis (depth falls toward zero / goes negative as the part
-  // drifts behind the view plane) — but NEVER by the orbit/zoom distance. The old orbit
-  // floor made the size track camera distance whenever zoom-toward-cursor parked the pivot
-  // away from the part (the "gizmo scales with distance" bug); a part-relative floor keeps a
-  // visible handle a constant pixel size regardless of where the pivot sits. Spec §4.1.
+  // Rationale in gizmo.hpp. The floor is keyed to the part's own eye distance, NOT the
+  // orbit distance — keying it to the zoom pivot was the "scales with distance" bug.
   constexpr double kScreenFactor = 0.15;
   constexpr double kMinDepthFrac = 0.25;  // floor: 25% of the module's own eye distance
   const double d = std::max(depthToModule, distanceToModule * kMinDepthFrac);
-  // Cap at the module's own size: a constant-pixel handle would otherwise dwarf a small/far
-  // part when zoomed out ("swallow the viewport"). Past the cap the world size is fixed, so
-  // the handle shrinks WITH the part as you keep zooming out instead of growing forever.
-  return std::min(d * kScreenFactor, maxScale);
+  return std::min(d * kScreenFactor, maxScale);  // cap so a far part isn't swallowed
 }
 
 bool gizmoIsAxis(GizmoHandle h) {

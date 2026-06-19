@@ -121,17 +121,15 @@ void sweep(const EditorState& state, ::Vector3 moduleDisp, double cursorNdcX, do
   for (int step = 0; step < 80; ++step) {  // ~80 steps reaches the 40000 zoom clamp ("fully out")
     const ::Camera3D cam = orbitCam(target, distance, yaw, pitch);
     const double scale = gizmoScaleFor(cam, state);
-    const ::Vector3 fwd = Vector3Normalize(Vector3Subtract(cam.target, cam.position));
-    const double depth = static_cast<double>(
-        Vector3DotProduct(Vector3Subtract(moduleDisp, cam.position), fwd));
+    const x4sb::editor::CameraBasis basis =
+        x4sb::editor::cameraBasis(toVec3(cam.target) - toVec3(cam.position), Vec3{0, 1, 0});
+    const double depth = dot(toVec3(moduleDisp) - toVec3(cam.position), basis.forward);
     const double eyeDist = static_cast<double>(Vector3Distance(cam.position, moduleDisp));
     const double armPx = gizmoArmPixels(state, cam, scale);
     std::printf("  %9.1f %9.1f %9.1f %9.1f %9.1f\n", distance, depth, eyeDist, scale, armPx);
     minPx = std::min(minPx, armPx);
     maxPx = std::max(maxPx, armPx);
 
-    const x4sb::editor::CameraBasis basis =
-        x4sb::editor::cameraBasis(toVec3(cam.target) - toVec3(cam.position), Vec3{0, 1, 0});
     const Vec3 rayDir = x4sb::editor::normalized(
         basis.forward + basis.right * (cursorNdcX * kTanHalfFov * aspect));
     const double k = 1.0 - wheel * 0.1;

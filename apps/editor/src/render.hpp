@@ -65,7 +65,7 @@ struct StationBounds {
 // the selected module, anchored at the live drag-preview pose while dragging. The
 // dragged module's own mesh moves live (see drawScene), so no AABB-box preview is
 // drawn. Call inside BeginMode3D/EndMode3D.
-void drawTranslateGizmo(const EditorState& state, const ::Camera3D& camera);
+void drawGizmo(const EditorState& state, const ::Camera3D& camera);
 
 // Draw the 2D HUD overlay (active module, filter, counts, undo state, controls).
 void drawHud(const EditorState& state, int screenWidth, int screenHeight, bool showGizmos);

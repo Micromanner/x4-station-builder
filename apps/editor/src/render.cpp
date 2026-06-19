@@ -207,25 +207,7 @@ struct ClipRange {
 }
 
 void drawDottedLine(::Vector3 start, ::Vector3 end, ::Color color) {
-  constexpr float dash = 300.0f;
-  constexpr float gap = 300.0f;
-  float dx = end.x - start.x;
-  float dy = end.y - start.y;
-  float dz = end.z - start.z;
-  float len = std::sqrt(dx * dx + dy * dy + dz * dz);
-  if (len < 1e-3f) return;
-  float ux = dx / len;
-  float uy = dy / len;
-  float uz = dz / len;
-
-  float dist = 0.0f;
-  while (dist < len) {
-    float segmentEnd = std::min(dist + dash, len);
-    ::Vector3 p1{start.x + ux * dist, start.y + uy * dist, start.z + uz * dist};
-    ::Vector3 p2{start.x + ux * segmentEnd, start.y + uy * segmentEnd, start.z + uz * segmentEnd};
-    DrawLine3D(p1, p2, color);
-    dist += dash + gap;
-  }
+  drawDashedLine3D(toVec3(start), toVec3(end), color, 300.0, 300.0);
 }
 
 void drawPlotDottedEdges() {
@@ -687,16 +669,16 @@ void drawScene(const EditorState& state, const ::Camera3D& camera, MeshCache& me
     }
   }
 
-  // Translate gizmo + drag preview last, inside the scene's global flip (its
-  // axes are X4-native, like every other primitive here), before endScene().
-  drawTranslateGizmo(state, camera);
+  // Gizmo + drag preview last, inside the scene's global flip (its axes are
+  // X4-native, like every other primitive here), before endScene().
+  drawGizmo(state, camera);
 
   drawSnapLink(state);
 
   endScene();
 }
 
-void drawTranslateGizmo(const EditorState& state, const ::Camera3D& camera) {
+void drawGizmo(const EditorState& state, const ::Camera3D& camera) {
   if (!state.selected()) return;
   const PlacedModule* m = state.station().find(*state.selected());
   if (m == nullptr) return;

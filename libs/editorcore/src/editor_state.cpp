@@ -38,17 +38,6 @@ Transform clampToPlot(const AABB& localAabb, Transform t) {
 
   return t;
 }
-
-bool isConnectorLinked(const PlacedModule& m, const std::string& pointId) {
-  for (const auto& l : m.links)
-    if (l.thisPointId == pointId) return true;
-  return false;
-}
-
-// Compatible if either side is untagged or the tags match (mirrors snap.cpp).
-bool connectorsCompatible(const ConnectionPoint& a, const ConnectionPoint& b) {
-  return a.type.empty() || b.type.empty() || a.type == b.type;
-}
 }  // namespace
 
 EditorState::EditorState(const ModuleCatalog& catalog) : catalog_(catalog) {
@@ -335,7 +324,7 @@ std::vector<SnapLink> EditorState::activeSnapLinks() const {
       const ModuleDef* tdef = target ? catalog_.find(target->defId) : nullptr;
       if (tdef == nullptr || e.connectorIndex >= tdef->connectionPoints.size()) continue;
       const ConnectionPoint& tp = tdef->connectionPoints[e.connectorIndex];
-      if (isConnectorLinked(*target, tp.id)) continue;  // target already occupied
+      if (connectorIsLinked(*target, tp.id)) continue;  // target already occupied
       if (!connectorsCompatible(np, tp)) continue;       // type tags incompatible
       out.push_back(SnapLink{npWorld, e.world});
     }

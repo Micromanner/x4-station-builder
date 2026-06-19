@@ -31,16 +31,12 @@ struct GizmoModel {
 
 [[nodiscard]] GizmoModel gizmoModel(Vec3 origin, double scale);
 
-// Handle length for the gizmo: CONSTANT on-screen size, like Blender/Unreal. Sized by
-// the camera-space DEPTH to the module (so a perspective camera projects it to the same
-// pixels at every zoom — same gizmo for every mesh), FLOORED at a fraction of the module's
-// own Euclidean eye distance so it can't collapse when the part drifts off-axis (depth ->
-// 0/negative behind the view plane), and CAPPED at `maxScale` so a far/zoomed-out part is
-// not swallowed by a constant-pixel handle (Unity-style: clamp the handle to the mesh's
-// screen footprint). Past the cap the handle stops growing and shrinks WITH the world.
-// The floor is part-relative, NOT orbit-relative: a zoom-distance floor made the size track
-// camera distance whenever zoom-toward-cursor parked the pivot away from the part. Feeds
-// BOTH the draw and the ray hit-test. Spec §4.1.
+// Handle length for the gizmo: constant on-screen size via the camera-space DEPTH to the
+// module (depth*factor projects to the same pixels at every zoom). Floored at a fraction of
+// the module's OWN eye distance — not the orbit distance, which made the size track the zoom
+// pivot — so it can't collapse as the part drifts off-axis; capped at `maxScale` so a
+// far/zoomed-out part isn't swallowed (past the cap it shrinks WITH the world). Feeds BOTH
+// the draw and the ray hit-test. Spec §4.1.
 [[nodiscard]] double gizmoScale(double depthToModule, double distanceToModule,
                                 double maxScale = std::numeric_limits<double>::infinity());
 

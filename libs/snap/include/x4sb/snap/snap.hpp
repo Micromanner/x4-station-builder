@@ -21,6 +21,13 @@ Transform computeSnapTransform(const Station& station, const ModuleCatalog& cata
                                InstanceId targetInstanceId, const std::string& targetPointId,
                                const ModuleDef& newDef, const std::string& newPointId);
 
+// Connector-mate predicates, the single source of truth for "which connectors may
+// join" — shared by the snap search and the editor's snap guide-lines so the two
+// never disagree. Compatible = either side untagged or the tags match (the real rule
+// is XML-driven, spec §5/§10.3); linked = the module already has a link on that point.
+[[nodiscard]] bool connectorsCompatible(const ConnectionPoint& a, const ConnectionPoint& b);
+[[nodiscard]] bool connectorIsLinked(const PlacedModule& m, const std::string& pointId);
+
 struct SnapCandidate {
   InstanceId instanceId{0};
   std::string targetPointId;
