@@ -167,7 +167,10 @@ void drawOneConnector(Vec3 world, Vec3 normal, bool linked, bool lit) {
   } else {
     c = lit ? ORANGE : ::Color{255, 161, 0, 90};
   }
-  DrawSphere(toRl(world), 20.0f, c);  // X4 scale: ~0.6 was sub-pixel
+  // Low-res sphere: a connector marker is a small on-screen dot, but DrawSphere's
+  // default 16x16 mesh is regenerated on the CPU per call — at ~80-280 markers/frame
+  // on a dense station that was ~3ms. 6x6 is visually identical here, ~7x cheaper.
+  DrawSphereEx(toRl(world), 20.0f, 6, 6, c);
   // The connector's local +Z is its facing normal. This MUST stay the same axis
   // the snap solver mates about (snap.cpp `kMate`, spec §3.1).
   DrawLine3D(toRl(world), toRl(world + normal * 80.0), c);  // X4 scale normal stub
@@ -181,7 +184,7 @@ void drawDashedLine3D(Vec3 a, Vec3 b, ::Color color, double dashLen, double gapL
   if (total < 1e-6) return;
   const Vec3 dir = span * (1.0 / total);
   const double stride = dashLen + gapLen;
-  constexpr int kMaxDashes = 64;
+  constexpr int kMaxDashes = 24;
   double s = 0.0;
   for (int i = 0; i < kMaxDashes && s < total; ++i, s += stride) {
     const double e = std::min(s + dashLen, total);
@@ -199,8 +202,8 @@ void drawSnapLink(const EditorState& state) {
   for (const SnapLink& link : state.activeSnapLinks()) {
     if (length(link.toWorld - link.fromWorld) < 1.0) continue;  // coincident: snapped
     drawDashedLine3D(link.fromWorld, link.toWorld, kSnap, 60.0, 40.0);
-    DrawSphere(toRl(link.fromWorld), 28.0F, kSnap);
-    DrawSphere(toRl(link.toWorld), 28.0F, kSnap);
+    DrawSphereEx(toRl(link.fromWorld), 28.0F, 6, 6, kSnap);  // low-res: see drawOneConnector
+    DrawSphereEx(toRl(link.toWorld), 28.0F, 6, 6, kSnap);
   }
 }
 
@@ -627,6 +630,7 @@ void drawScene(const EditorState& state, const ::Camera3D& camera, MeshCache& me
   }
 
   if (hasRef && isRefValid) {
+    ZoneScopedN("iact: facegrids");
     auto drawFaceGrid = [](int axis, double value, double uVal, double vVal, ::Color gridColor) {
       constexpr double gridHalfSize = 1500.0;
       constexpr int steps = 6;
@@ -759,6 +763,7 @@ void drawScene(const EditorState& state, const ::Camera3D& camera, MeshCache& me
   }
 
   if (state.ghost()) {
+    ZoneScopedN("iact: ghost+clearance");
     const ModuleDef* gdef = state.defFor(state.ghost()->defId);
     if (gdef != nullptr) {
       const ::Color fill =
@@ -780,9 +785,15 @@ void drawScene(const EditorState& state, const ::Camera3D& camera, MeshCache& me
 
   // Gizmo + drag preview last, inside the scene's global flip (its axes are
   // X4-native, like every other primitive here), before endScene().
-  drawGizmo(state, camera);
+  {
+    ZoneScopedN("iact: gizmo");
+    drawGizmo(state, camera);
+  }
 
-  drawSnapLink(state);
+  {
+    ZoneScopedN("iact: snaplinks");
+    drawSnapLink(state);
+  }
 
   endScene();
 }

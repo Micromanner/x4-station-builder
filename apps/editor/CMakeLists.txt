@@ -12,6 +12,7 @@ add_executable(x4sb-editor
   src/megashot.cpp
   src/gizmoshot.cpp
   src/profile.cpp
+  src/iprofile.cpp
   src/connbench.cpp
   src/loadbench.cpp
   src/rdc_api.cpp

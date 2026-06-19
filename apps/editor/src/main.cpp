@@ -12,6 +12,7 @@
 #include "megashot.hpp"
 #include "mesh_load.hpp"
 #include "plan_io.hpp"
+#include "iprofile.hpp"
 #include "profile.hpp"
 #include "profiling.hpp"
 #include "rdc_capture.hpp"
@@ -105,6 +106,9 @@ int main(int argc, char** argv) {
     }
     if (std::string(argv[i]) == "--profile" && i + 2 < argc) {
       return x4sb::editor::runProfile(std::string(argv[i + 1]), std::atoi(argv[i + 2]));
+    }
+    if (std::string(argv[i]) == "--iprofile" && i + 2 < argc) {
+      return x4sb::editor::runInteractiveProfile(std::string(argv[i + 1]), std::atoi(argv[i + 2]));
     }
     if (std::string(argv[i]) == "--connbench" && i + 2 < argc) {
       const double sp = (i + 3 < argc) ? std::atof(argv[i + 3]) : 0.0;

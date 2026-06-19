@@ -6,30 +6,34 @@ InstanceId Station::add(const PlacedModule& m) {
   PlacedModule copy = m;
   if (copy.instanceId == 0) copy.instanceId = nextId_++;
   if (copy.instanceId >= nextId_) nextId_ = copy.instanceId + 1;
+  const InstanceId id = copy.instanceId;
   placed_.push_back(std::move(copy));
-  return placed_.back().instanceId;
+  index_[id] = placed_.size() - 1;  // append never shifts existing positions
+  return id;
 }
 
 bool Station::remove(InstanceId id) {
-  for (auto it = placed_.begin(); it != placed_.end(); ++it) {
-    if (it->instanceId == id) {
-      placed_.erase(it);
-      return true;
-    }
-  }
-  return false;
+  const auto it = index_.find(id);
+  if (it == index_.end()) return false;
+  placed_.erase(placed_.begin() + static_cast<std::ptrdiff_t>(it->second));
+  reindex();  // erase shifts every later position; remove is not on the hot path
+  return true;
 }
 
 PlacedModule* Station::find(InstanceId id) {
-  for (auto& p : placed_)
-    if (p.instanceId == id) return &p;
-  return nullptr;
+  const auto it = index_.find(id);
+  return it == index_.end() ? nullptr : &placed_[it->second];
 }
 
 const PlacedModule* Station::find(InstanceId id) const {
-  for (const auto& p : placed_)
-    if (p.instanceId == id) return &p;
-  return nullptr;
+  const auto it = index_.find(id);
+  return it == index_.end() ? nullptr : &placed_[it->second];
+}
+
+void Station::reindex() {
+  index_.clear();
+  index_.reserve(placed_.size());
+  for (std::size_t i = 0; i < placed_.size(); ++i) index_[placed_[i].instanceId] = i;
 }
 
 void UndoStack::execute(Station& s, std::unique_ptr<Command> cmd) {

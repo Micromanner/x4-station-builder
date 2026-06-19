@@ -6,6 +6,7 @@
 #include <cstdint>
 #include <memory>
 #include <string>
+#include <unordered_map>
 #include <vector>
 
 namespace x4sb {
@@ -38,7 +39,15 @@ class Station {
   [[nodiscard]] bool empty() const { return placed_.empty(); }
 
  private:
+  // id -> position in placed_, so find() is O(1) instead of a linear scan. The
+  // snap search resolves a connector's owning module per grid candidate, thousands
+  // of times per frame on a dense station, so a linear find() there silently turned
+  // the grid-accelerated path back into O(modules) per candidate (known-issues 1.2
+  // follow-up). Maintained only by add()/remove(); find() returns a mutable element
+  // for in-place edits, which never change ids, so the map stays valid.
+  void reindex();
   std::vector<PlacedModule> placed_;
+  std::unordered_map<InstanceId, std::size_t> index_;
   InstanceId nextId_{1};
 };
 

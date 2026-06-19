@@ -348,6 +348,22 @@ std::vector<SnapLink> EditorState::activeSnapLinks() const {
       out.push_back(SnapLink{npWorld, e.world});
     }
   }
+
+  // Keep only the nearest kMaxLinks. drawSnapLink draws a dashed line + two high-poly
+  // DrawSphere endpoints PER link, so an unbounded count tanked the frame on a dense
+  // station (Sphere Shipyard: mean ~340, max ~970 links/frame -> a ~25ms render spike).
+  // The nearest few are the useful "where will it snap" hint; sparse scenes (< cap) are
+  // unchanged, so the "every reachable target" behaviour still holds where it matters.
+  constexpr std::size_t kMaxLinks = 24;
+  if (out.size() > kMaxLinks) {
+    const auto lenSq = [](const SnapLink& l) {
+      const Vec3 d = l.toWorld - l.fromWorld;
+      return d.x * d.x + d.y * d.y + d.z * d.z;
+    };
+    std::partial_sort(out.begin(), out.begin() + kMaxLinks, out.end(),
+                      [&](const SnapLink& a, const SnapLink& b) { return lenSq(a) < lenSq(b); });
+    out.resize(kMaxLinks);
+  }
   return out;
 }
 
