@@ -28,6 +28,14 @@ struct Ghost {
   std::optional<SnapCandidate> candidate;
 };
 
+// The connector pair about to snap, in world space, for the renderer's approach
+// guide-line. Both points are at the active module's CURRENT pose, so as it snaps
+// they converge to the joint. Spec §5.
+struct SnapLink {
+  Vec3 fromWorld;  // active/ghost/dragged module's connector
+  Vec3 toWorld;    // target module's connector
+};
+
 class EditorState {
  public:
   explicit EditorState(const ModuleCatalog& catalog);
@@ -117,6 +125,11 @@ class EditorState {
   // The handle to highlight: the active drag handle while dragging, else the hover.
   [[nodiscard]] std::optional<GizmoHandle> highlightHandle() const;
 
+  // Translate vs Rotate gizmo handle set. Resets to Translate when a module is
+  // selected (most-common action); the shell's T/Y keys flip it.
+  [[nodiscard]] GizmoMode gizmoMode() const { return gizmoMode_; }
+  void setGizmoMode(GizmoMode m) { gizmoMode_ = m; }
+
   // ── Read access for the renderer ────────────────────────────────────────
   [[nodiscard]] const Station& station() const { return station_; }
   // The catalog this state was built with (for the renderer's def lookups).
@@ -128,6 +141,13 @@ class EditorState {
   // load) — never per frame. Logically const: the cache does not change the
   // observable document, so it is exposed to the const renderer path.
   [[nodiscard]] const ConnectorGrid& connectorGrid() const;
+
+  // EVERY compatible free connector pair within the approach radius of the active
+  // ghost (placement) or dragged module, at its current pose — for the renderer's
+  // snap guide-lines. Its own (wider) search, independent of the committed snap, so it
+  // shows ALL possible snaps, not just the nearest. Empty when nothing is in range or
+  // there is no ghost/drag. Spec §5.2.
+  [[nodiscard]] std::vector<SnapLink> activeSnapLinks() const;
 
  private:
   [[nodiscard]] std::vector<std::string> filteredOrder() const;
@@ -160,10 +180,16 @@ class EditorState {
   };
   std::optional<GizmoDrag> drag_;
   std::optional<GizmoHandle> hoveredHandle_;  // gizmo handle under the cursor, if any
+  GizmoMode gizmoMode_{GizmoMode::Translate};
   // Snap-on-move is magnetic but only near the joint, so it uses a tighter radius
   // than the cursor-proxy placement snapRadius_ (which is large because the ghost
   // cursor is a far box-surface hit, spec §6). Tunable.
   double dragSnapRadius_{300.0};
+
+  // Approach radius for the guide-line: wider than the snap radii so the line shows
+  // DURING the approach, before the instant magnetic snap coincides the connectors
+  // (like the proximity glow). Tunable.
+  double lineRadius_{2000.0};
 
   // Tunables (parent §6); public access added later if the UI exposes them.
   // snapRadius is in X4 world units: modules span up to ~1500 and connectors sit

@@ -7,7 +7,7 @@ using namespace x4sb;
 TEST_CASE("gizmoPick: a ray down an axis selects that axis") {
   const GizmoModel g = gizmoModel(Vec3{0, 0, 0}, 1.0);  // axisLength 1
   // Ray from above the X axis at x=0.5 pointing down hits (0.5,0,0): on +X.
-  const auto h = gizmoPick(g, Vec3{0.5, 1, 0}, Vec3{0, -1, 0});
+  const auto h = gizmoPick(g, Vec3{0.5, 1, 0}, Vec3{0, -1, 0}, GizmoMode::Translate);
   REQUIRE(h.has_value());
   CHECK(*h == GizmoHandle::AxisX);
 }
@@ -15,7 +15,7 @@ TEST_CASE("gizmoPick: a ray down an axis selects that axis") {
 TEST_CASE("gizmoPick: a ray into a plane quad selects that plane") {
   const GizmoModel g = gizmoModel(Vec3{0, 0, 0}, 1.0);  // planeSize 0.3
   // (0.15,0,0.15) is inside the XZ (PlaneZX) quad and >axisPickRadius from any axis.
-  const auto h = gizmoPick(g, Vec3{0.15, 1, 0.15}, Vec3{0, -1, 0});
+  const auto h = gizmoPick(g, Vec3{0.15, 1, 0.15}, Vec3{0, -1, 0}, GizmoMode::Translate);
   REQUIRE(h.has_value());
   CHECK(*h == GizmoHandle::PlaneZX);
 }
@@ -23,7 +23,7 @@ TEST_CASE("gizmoPick: a ray into a plane quad selects that plane") {
 TEST_CASE("gizmoPick: a ray missing every handle returns none") {
   const GizmoModel g = gizmoModel(Vec3{0, 0, 0}, 1.0);
   // Far from the origin and pointing away.
-  CHECK_FALSE(gizmoPick(g, Vec3{50, 50, 50}, Vec3{0, 1, 0}).has_value());
+  CHECK_FALSE(gizmoPick(g, Vec3{50, 50, 50}, Vec3{0, 1, 0}, GizmoMode::Translate).has_value());
 }
 
 TEST_CASE("gizmo axis/plane accessors") {
@@ -64,20 +64,31 @@ TEST_CASE("gizmoPick: a ray onto a rotation ring selects that ring") {
   // A point on the RotY ring (XZ plane, r=1) away from any axis crossing, so it
   // can't be mistaken for an axis handle.
   const double s = 0.70710678;
-  const auto h = gizmoPick(g, Vec3{s, 1, s}, Vec3{0, -1, 0});
+  const auto h = gizmoPick(g, Vec3{s, 1, s}, Vec3{0, -1, 0}, GizmoMode::Rotate);
   REQUIRE(h.has_value());
   CHECK(*h == GizmoHandle::RotY);
 }
 
-TEST_CASE("gizmoScale: tracks the module size between the screen-relative clamps") {
-  // dist 100 -> floor = 100*0.06 = 6, ceiling = 100*0.7 = 70; factor k = 1.3.
-  const double dist = 100.0;
-  // A mid-size module (radius 20 -> 26) lands between the clamps: gizmo tracks it.
-  CHECK(gizmoScale(20.0, dist) == doctest::Approx(26.0));
-  // A tiny module (radius 2 -> 2.6) would be sub-pixel: clamped UP to the floor.
-  CHECK(gizmoScale(2.0, dist) == doctest::Approx(6.0));
-  // A huge module (radius 100 -> 130) would fill the screen: clamped DOWN to the ceiling.
-  CHECK(gizmoScale(100.0, dist) == doctest::Approx(70.0));
+TEST_CASE("gizmoScale: depth-based constant screen size, floored to the eye distance") {
+  // Healthy depth (>= 25% of the module's eye distance) -> depth * 0.15: constant on
+  // screen, independent of the orbit/zoom pivot (the "scales with distance" fix).
+  CHECK(gizmoScale(/*depth=*/1000.0, /*eyeDist=*/2000.0) == doctest::Approx(150.0));
+  CHECK(gizmoScale(2000.0, 2000.0) == doctest::Approx(300.0));  // dead-centre: depth == dist
+  // Depth collapsing off-axis (small or negative, while the part is still 2000 from the
+  // eye) is floored to 25% of the eye distance, so it never reaches zero (off-axis vanish).
+  CHECK(gizmoScale(10.0, 2000.0) == doctest::Approx(75.0));   // floor 500 -> 500*0.15
+  CHECK(gizmoScale(-50.0, 2000.0) == doctest::Approx(75.0));  // negative depth floored
+}
+
+TEST_CASE("gizmoScale: capped to the module size so a far part isn't swallowed") {
+  // Zoomed IN: depth*0.15 is below the cap -> constant-pixel size, cap inert.
+  CHECK(gizmoScale(/*depth=*/100.0, /*eyeDist=*/100.0, /*maxScale=*/200.0) ==
+        doctest::Approx(15.0));
+  // Zoomed OUT: depth*0.15 (1500) would dwarf a small part; clamp to the module-size cap.
+  CHECK(gizmoScale(/*depth=*/10000.0, /*eyeDist=*/10000.0, /*maxScale=*/200.0) ==
+        doctest::Approx(200.0));
+  // No cap supplied (default infinity) => pure constant-pixel behaviour, unchanged.
+  CHECK(gizmoScale(10000.0, 10000.0) == doctest::Approx(1500.0));
 }
 
 TEST_CASE("gizmoDragRotation: signed angle swept about the ring axis") {
@@ -91,7 +102,7 @@ TEST_CASE("gizmoDragRotation: signed angle swept about the ring axis") {
 TEST_CASE("gizmoPick: a ray into the center sphere selects the Center handle") {
   const GizmoModel g = gizmoModel(Vec3{0, 0, 0}, 1.0); // centerPickRadius 0.15
   // A ray passing through the origin (0, 0, 0)
-  const auto h = gizmoPick(g, Vec3{0, 0, 10}, Vec3{0, 0, -1});
+  const auto h = gizmoPick(g, Vec3{0, 0, 10}, Vec3{0, 0, -1}, GizmoMode::Translate);
   REQUIRE(h.has_value());
   CHECK(*h == GizmoHandle::Center);
 
@@ -101,7 +112,7 @@ TEST_CASE("gizmoPick: a ray into the center sphere selects the Center handle") {
   // But is it within planes? The PlaneXY quad spans x[0, 0.3] and y[0, 0.3].
   // Center sphere is in front of the XY plane (intersection at z = 0.15 * scale - ...).
   // So the sphere hit distance tCenter should be smaller than tPlane, selecting Center!
-  const auto h2 = gizmoPick(g, Vec3{0.05, 0.05, 10}, Vec3{0, 0, -1});
+  const auto h2 = gizmoPick(g, Vec3{0.05, 0.05, 10}, Vec3{0, 0, -1}, GizmoMode::Translate);
   REQUIRE(h2.has_value());
   CHECK(*h2 == GizmoHandle::Center);
 }
@@ -118,5 +129,18 @@ TEST_CASE("gizmoDragDelta: Center handle drags along screen plane") {
   CHECK(delta.x == doctest::Approx(1.0));
   CHECK(delta.y == doctest::Approx(1.0));
   CHECK(delta.z == doctest::Approx(0.0));
+}
+
+TEST_CASE("gizmoPick: Translate mode ignores rotation rings") {
+  const GizmoModel g = gizmoModel(Vec3{0, 0, 0}, 1.0);  // ringRadius 1
+  const double s = 0.70710678;  // a point on the RotY ring, off every axis
+  CHECK(gizmoPick(g, Vec3{s, 1, s}, Vec3{0, -1, 0}, GizmoMode::Rotate) == GizmoHandle::RotY);
+  CHECK_FALSE(gizmoPick(g, Vec3{s, 1, s}, Vec3{0, -1, 0}, GizmoMode::Translate).has_value());
+}
+
+TEST_CASE("gizmoPick: Rotate mode ignores translate arrows") {
+  const GizmoModel g = gizmoModel(Vec3{0, 0, 0}, 1.0);  // axisLength 1
+  CHECK(gizmoPick(g, Vec3{0.5, 1, 0}, Vec3{0, -1, 0}, GizmoMode::Translate) == GizmoHandle::AxisX);
+  CHECK_FALSE(gizmoPick(g, Vec3{0.5, 1, 0}, Vec3{0, -1, 0}, GizmoMode::Rotate).has_value());
 }
 

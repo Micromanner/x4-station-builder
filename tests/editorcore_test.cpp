@@ -361,6 +361,7 @@ TEST_CASE("gizmo drag: a rotation ring spins the module in place and commits") {
   const InstanceId id = s.commitGhost().value();  // module at origin
   s.selectByRay(Vec3{0, 0, -10}, Vec3{0, 0, 1});
   REQUIRE(s.selected().value() == id);
+  s.setGizmoMode(GizmoMode::Rotate);  // rings are only pickable in Rotate mode
 
   const double scale = 5.0;  // ringRadius 5
   // Grab the RotY ring at a point off the axes: (3.5355, 0, 3.5355), r = 5.
@@ -437,5 +438,92 @@ TEST_CASE("plot boundary box validation constraints") {
   
   // Position is clamped to 9998.5
   CHECK(s.station().find(id)->worldTransform.position.x == doctest::Approx(9998.5));
+}
+
+TEST_CASE("gizmo mode: defaults to Translate, settable, resets when a module is selected") {
+  const ModuleCatalog c = twoModuleCatalog();
+  EditorState s(c);  // active = a_mod
+  CHECK(s.gizmoMode() == GizmoMode::Translate);
+
+  s.setGizmoMode(GizmoMode::Rotate);
+  CHECK(s.gizmoMode() == GizmoMode::Rotate);
+
+  // Place a_mod at the origin, switch to Rotate, then select it: selecting resets.
+  s.updateGhost(Vec3{0, 10, 0}, Vec3{0, -1, 0});
+  REQUIRE(s.commitGhost().has_value());
+  s.setGizmoMode(GizmoMode::Rotate);
+  s.selectByRay(Vec3{0, 10, 0}, Vec3{0, -1, 0});  // ray down hits the placed module
+  REQUIRE(s.selected().has_value());
+  CHECK(s.gizmoMode() == GizmoMode::Translate);
+}
+
+TEST_CASE("activeSnapLinks: shows the approaching connector pair before snapping") {
+  const ModuleCatalog c = twoModuleCatalog();  // a_mod conn a1 at local (+0.5,0,0)
+  EditorState s(c);  // active = a_mod
+
+  // Root-place a_mod at the origin: its free connector a1 sits at world (0.5,0,0).
+  s.updateGhost(Vec3{0, 10, 0}, Vec3{0, -1, 0});
+  REQUIRE(s.commitGhost().has_value());
+
+  // Active = b_mod (conn b1 at local (-0.5,0,0)). Free-place its ghost so b1 lands
+  // ~50 units from a1 — inside the approach radius, but NOT a snap (forceFree).
+  s.cycleActive(1);
+  REQUIRE(s.activeDef()->id == "b_mod");
+  s.setPlaceDistance(50.0);
+  s.updateGhost(/*origin=*/Vec3{1, 0, 0}, /*dir=*/Vec3{0, 0, 1}, /*forceFree=*/true);
+  REQUIRE(s.ghost().has_value());
+  CHECK_FALSE(s.ghost()->candidate.has_value());  // free-placed, not snapped
+
+  const std::vector<SnapLink> links = s.activeSnapLinks();
+  REQUIRE(links.size() == 1);
+  CHECK(links[0].fromWorld.x == doctest::Approx(0.5));   // b1 at the ghost pose
+  CHECK(links[0].fromWorld.z == doctest::Approx(50.0));
+  CHECK(links[0].toWorld.x == doctest::Approx(0.5));     // a1 on the placed module
+  CHECK(links[0].toWorld.z == doctest::Approx(0.0));
+}
+
+TEST_CASE("activeSnapLinks: a guide-line for EVERY reachable target, not just the nearest") {
+  const ModuleCatalog c = twoModuleCatalog();
+  EditorState s(c);  // active = a_mod
+
+  // Two free-placed a_mod instances: a1 connectors land at (0.5,0,0) and (0.5,0,100).
+  s.updateGhost(Vec3{0, 10, 0}, Vec3{0, -1, 0});
+  REQUIRE(s.commitGhost().has_value());
+  s.setPlaceDistance(100.0);
+  s.updateGhost(Vec3{0, 0, 0}, Vec3{0, 0, 1}, /*forceFree=*/true);  // origin -> (0,0,100)
+  REQUIRE(s.commitGhost().has_value());
+  REQUIRE(s.station().size() == 2);
+
+  // b_mod ghost with b1 at (0.5,0,50): 50 units from BOTH a1 connectors (both in range).
+  s.cycleActive(1);
+  REQUIRE(s.activeDef()->id == "b_mod");
+  s.setPlaceDistance(50.0);
+  s.updateGhost(Vec3{1, 0, 0}, Vec3{0, 0, 1}, /*forceFree=*/true);  // b1 -> (0.5,0,50)
+  REQUIRE(s.ghost().has_value());
+  CHECK_FALSE(s.ghost()->candidate.has_value());
+
+  const std::vector<SnapLink> links = s.activeSnapLinks();
+  REQUIRE(links.size() == 2);  // BOTH targets get a guide-line, not just the nearest
+  CHECK(links[0].fromWorld.x == doctest::Approx(0.5));  // both start at b1's world pos
+  CHECK(links[0].fromWorld.z == doctest::Approx(50.0));
+  CHECK(links[1].fromWorld.z == doctest::Approx(50.0));
+  // The two targets are the two a1 connectors (z = 0 and 100), in either order.
+  const double z0 = links[0].toWorld.z;
+  const double z1 = links[1].toWorld.z;
+  CHECK(((z0 == doctest::Approx(0.0) && z1 == doctest::Approx(100.0)) ||
+         (z0 == doctest::Approx(100.0) && z1 == doctest::Approx(0.0))));
+}
+
+TEST_CASE("activeSnapLinks: empty when far, empty with no ghost/drag") {
+  const ModuleCatalog c = twoModuleCatalog();
+  EditorState s(c);
+  CHECK(s.activeSnapLinks().empty());  // no ghost, no drag
+
+  s.updateGhost(Vec3{0, 10, 0}, Vec3{0, -1, 0});
+  REQUIRE(s.commitGhost().has_value());
+  s.cycleActive(1);  // b_mod
+  s.setPlaceDistance(5000.0);
+  s.updateGhost(Vec3{1, 0, 0}, Vec3{0, 0, 1}, /*forceFree=*/true);  // b1 ~5000 away
+  CHECK(s.activeSnapLinks().empty());  // beyond lineRadius_
 }
 

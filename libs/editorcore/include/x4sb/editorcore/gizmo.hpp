@@ -5,11 +5,17 @@
 // math; never includes raylib, so it tests under the `core` preset.
 #include "x4sb/data/math.hpp"
 
+#include <limits>
 #include <optional>
 
 namespace x4sb {
 
 enum class GizmoHandle { AxisX, AxisY, AxisZ, PlaneXY, PlaneYZ, PlaneZX, RotX, RotY, RotZ, Center };
+
+// Which handle set the gizmo currently shows / picks. Modes are mutually exclusive
+// to declutter the viewport (spec §4.2): Translate = arrows + planes + center,
+// Rotate = rings.
+enum class GizmoMode { Translate, Rotate };
 
 // Handle extents in world units. `scale` is the world length the renderer wants
 // the axis handles to span at the module's current camera distance (constant
@@ -25,17 +31,28 @@ struct GizmoModel {
 
 [[nodiscard]] GizmoModel gizmoModel(Vec3 origin, double scale);
 
-// On-screen handle length for the gizmo. Tracks the selected module's bounding
-// radius (world-relative, so the gizmo looks anchored to the module instead of
-// growing as you zoom out), clamped to a screen-relative min/max — fractions of
-// the camera distance — so it is never sub-pixel nor screen-filling. Feeds BOTH
-// the draw and the ray hit-test, keeping them consistent. Spec §4.
-[[nodiscard]] double gizmoScale(double moduleRadius, double camDistance);
+// Handle length for the gizmo: CONSTANT on-screen size, like Blender/Unreal. Sized by
+// the camera-space DEPTH to the module (so a perspective camera projects it to the same
+// pixels at every zoom — same gizmo for every mesh), FLOORED at a fraction of the module's
+// own Euclidean eye distance so it can't collapse when the part drifts off-axis (depth ->
+// 0/negative behind the view plane), and CAPPED at `maxScale` so a far/zoomed-out part is
+// not swallowed by a constant-pixel handle (Unity-style: clamp the handle to the mesh's
+// screen footprint). Past the cap the handle stops growing and shrinks WITH the world.
+// The floor is part-relative, NOT orbit-relative: a zoom-distance floor made the size track
+// camera distance whenever zoom-toward-cursor parked the pivot away from the part. Feeds
+// BOTH the draw and the ray hit-test. Spec §4.1.
+[[nodiscard]] double gizmoScale(double depthToModule, double distanceToModule,
+                                double maxScale = std::numeric_limits<double>::infinity());
 
-// Which handle (if any) the X4-space ray picks. Plane quads take priority over
-// axes (they sit nearer the origin and are the smaller target).
+// Which in-mode handle (if any) the X4-space ray picks. Plane quads take priority
+// over axes. Handles not in `mode` are ignored entirely (so an out-of-mode handle
+// can never occlude an in-mode one). Spec §4.2.
 [[nodiscard]] std::optional<GizmoHandle> gizmoPick(const GizmoModel& g, Vec3 rayOrigin,
-                                                   Vec3 rayDir);
+                                                   Vec3 rayDir, GizmoMode mode);
+
+// True if `h` is shown/pickable in `mode`: Rotate => the rings; Translate => axes,
+// planes, and the center handle.
+[[nodiscard]] bool gizmoHandleInMode(GizmoHandle h, GizmoMode mode);
 
 [[nodiscard]] bool gizmoIsAxis(GizmoHandle h);       // AxisX/Y/Z
 [[nodiscard]] bool gizmoIsRotation(GizmoHandle h);   // RotX/Y/Z

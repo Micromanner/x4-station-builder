@@ -96,17 +96,22 @@ GizmoModel gizmoModel(Vec3 origin, double scale) {
   return g;
 }
 
-double gizmoScale(double moduleRadius, double camDistance) {
-  // World-relative: arms reach ~1.3x the module's bounding radius so the handles
-  // sit just outside the mesh, and the whole gizmo grows/shrinks WITH the module
-  // (the user's complaint: a screen-constant gizmo looked like it grew on zoom-out).
-  constexpr double kReach = 1.3;
-  // Screen-relative guards (fractions of camera distance): a floor so a tiny module
-  // is still grabbable, a ceiling so a huge module's gizmo never fills the view.
-  constexpr double kMinFrac = 0.06;
-  constexpr double kMaxFrac = 0.7;
-  const double d = camDistance > 0.0 ? camDistance : 0.0;
-  return std::clamp(moduleRadius * kReach, d * kMinFrac, d * kMaxFrac);
+double gizmoScale(double depthToModule, double distanceToModule, double maxScale) {
+  // Constant on-screen size = a fixed fraction of the camera-space depth to the module:
+  // depth*screenFactor projects to the same pixels at any zoom (the perspective divide
+  // cancels). Floor the depth at a fraction of the module's OWN Euclidean eye distance so
+  // the handle can't collapse off-axis (depth falls toward zero / goes negative as the part
+  // drifts behind the view plane) — but NEVER by the orbit/zoom distance. The old orbit
+  // floor made the size track camera distance whenever zoom-toward-cursor parked the pivot
+  // away from the part (the "gizmo scales with distance" bug); a part-relative floor keeps a
+  // visible handle a constant pixel size regardless of where the pivot sits. Spec §4.1.
+  constexpr double kScreenFactor = 0.15;
+  constexpr double kMinDepthFrac = 0.25;  // floor: 25% of the module's own eye distance
+  const double d = std::max(depthToModule, distanceToModule * kMinDepthFrac);
+  // Cap at the module's own size: a constant-pixel handle would otherwise dwarf a small/far
+  // part when zoomed out ("swallow the viewport"). Past the cap the world size is fixed, so
+  // the handle shrinks WITH the part as you keep zooming out instead of growing forever.
+  return std::min(d * kScreenFactor, maxScale);
 }
 
 bool gizmoIsAxis(GizmoHandle h) {
@@ -115,6 +120,10 @@ bool gizmoIsAxis(GizmoHandle h) {
 
 bool gizmoIsRotation(GizmoHandle h) {
   return h == GizmoHandle::RotX || h == GizmoHandle::RotY || h == GizmoHandle::RotZ;
+}
+
+bool gizmoHandleInMode(GizmoHandle h, GizmoMode mode) {
+  return mode == GizmoMode::Rotate ? gizmoIsRotation(h) : !gizmoIsRotation(h);
 }
 
 Vec3 gizmoAxisDir(GizmoHandle h) {
@@ -146,21 +155,26 @@ Vec3 gizmoPlaneNormal(GizmoHandle h) {
   }
 }
 
-std::optional<GizmoHandle> gizmoPick(const GizmoModel& g, Vec3 rayOrigin, Vec3 rayDir) {
+std::optional<GizmoHandle> gizmoPick(const GizmoModel& g, Vec3 rayOrigin, Vec3 rayDir,
+                                     GizmoMode mode) {
   std::optional<GizmoHandle> best;
   double bestT = std::numeric_limits<double>::infinity();
 
   // Center handle check
-  const std::optional<double> tCenter = raySphereT(rayOrigin, rayDir, g.origin, g.centerPickRadius);
-  if (tCenter && *tCenter < bestT) {
-    bestT = *tCenter;
-    best = GizmoHandle::Center;
+  if (gizmoHandleInMode(GizmoHandle::Center, mode)) {
+    const std::optional<double> tCenter =
+        raySphereT(rayOrigin, rayDir, g.origin, g.centerPickRadius);
+    if (tCenter && *tCenter < bestT) {
+      bestT = *tCenter;
+      best = GizmoHandle::Center;
+    }
   }
 
   // Plane handles first (priority): pick the nearest plane quad the ray enters.
   const std::array<GizmoHandle, 3> planes{GizmoHandle::PlaneXY, GizmoHandle::PlaneYZ,
                                           GizmoHandle::PlaneZX};
   for (const GizmoHandle h : planes) {
+    if (!gizmoHandleInMode(h, mode)) continue;
     const std::optional<double> t = rayPlaneT(rayOrigin, rayDir, g.origin, gizmoPlaneNormal(h));
     if (!t) continue;
     const Vec3 hit = rayOrigin + rayDir * (*t);
@@ -179,6 +193,7 @@ std::optional<GizmoHandle> gizmoPick(const GizmoModel& g, Vec3 rayOrigin, Vec3 r
   // Axis handles and rotation rings compete on nearest ray distance.
   const std::array<GizmoHandle, 3> axes{GizmoHandle::AxisX, GizmoHandle::AxisY, GizmoHandle::AxisZ};
   for (const GizmoHandle h : axes) {
+    if (!gizmoHandleInMode(h, mode)) continue;
     const Vec3 a = g.origin;
     const Vec3 b = g.origin + gizmoAxisDir(h) * g.axisLength;
     const RaySegResult r = rayToSegment(rayOrigin, rayDir, a, b);
@@ -192,6 +207,7 @@ std::optional<GizmoHandle> gizmoPick(const GizmoModel& g, Vec3 rayOrigin, Vec3 r
   // Hit when the ray crosses that plane within axisPickRadius of the ring radius.
   const std::array<GizmoHandle, 3> rings{GizmoHandle::RotX, GizmoHandle::RotY, GizmoHandle::RotZ};
   for (const GizmoHandle h : rings) {
+    if (!gizmoHandleInMode(h, mode)) continue;
     const std::optional<double> t = rayPlaneT(rayOrigin, rayDir, g.origin, gizmoAxisDir(h));
     if (!t) continue;
     const Vec3 hit = rayOrigin + rayDir * (*t);

@@ -38,6 +38,17 @@ Transform clampToPlot(const AABB& localAabb, Transform t) {
 
   return t;
 }
+
+bool isConnectorLinked(const PlacedModule& m, const std::string& pointId) {
+  for (const auto& l : m.links)
+    if (l.thisPointId == pointId) return true;
+  return false;
+}
+
+// Compatible if either side is untagged or the tags match (mirrors snap.cpp).
+bool connectorsCompatible(const ConnectionPoint& a, const ConnectionPoint& b) {
+  return a.type.empty() || b.type.empty() || a.type == b.type;
+}
 }  // namespace
 
 EditorState::EditorState(const ModuleCatalog& catalog) : catalog_(catalog) {
@@ -176,6 +187,7 @@ void EditorState::loadStation(Station station) {
 
 std::optional<InstanceId> EditorState::selectByRay(Vec3 rayOriginX4, Vec3 rayDirX4) {
   selected_ = pickModule(station_, catalog_, rayOriginX4, rayDirX4);
+  if (selected_) gizmoMode_ = GizmoMode::Translate;  // a fresh selection starts in move mode
   return selected_;
 }
 
@@ -191,7 +203,7 @@ bool EditorState::beginGizmoDrag(Vec3 rayOriginX4, Vec3 rayDirX4, double gizmoSc
   const PlacedModule* m = station_.find(*selected_);
   if (m == nullptr) return false;
   const GizmoModel g = gizmoModel(m->worldTransform.position, gizmoScale);
-  const std::optional<GizmoHandle> handle = gizmoPick(g, rayOriginX4, rayDirX4);
+  const std::optional<GizmoHandle> handle = gizmoPick(g, rayOriginX4, rayDirX4, gizmoMode_);
   if (!handle) return false;
 
   ghost_.reset();  // a grab is not a placement
@@ -290,6 +302,47 @@ std::optional<Transform> EditorState::dragPreview() const {
   return drag_->preview;
 }
 
+std::vector<SnapLink> EditorState::activeSnapLinks() const {
+  // A guide-line for EVERY compatible free connector pair within the approach radius
+  // (not just the nearest) so the user sees all the places it could snap — like the
+  // proximity glow, but precise. The lines collapse to the joint as the magnet engages.
+  std::vector<SnapLink> out;
+  const ModuleDef* def = nullptr;
+  Transform pose;
+  InstanceId ignore = 0;
+  if (drag_) {
+    const PlacedModule* m = station_.find(drag_->id);
+    if (m == nullptr) return out;
+    def = catalog_.find(m->defId);
+    pose = drag_->preview;
+    ignore = drag_->id;
+  } else if (ghost_) {
+    def = catalog_.find(ghost_->defId);
+    pose = ghost_->worldTransform;
+  } else {
+    return out;
+  }
+  if (def == nullptr) return out;
+
+  // Pair each of the active module's connectors with every nearby compatible free
+  // target connector. Grid-accelerated, so the cost is local, not station-wide.
+  const ConnectorGrid& grid = connectorGrid();
+  for (const ConnectionPoint& np : def->connectionPoints) {
+    const Vec3 npWorld = apply(pose, np.localPosition);
+    for (const ConnectorGrid::Entry& e : grid.queryRadius(npWorld, lineRadius_)) {
+      if (e.instanceId == ignore) continue;  // never snap a module to itself
+      const PlacedModule* target = station_.find(e.instanceId);
+      const ModuleDef* tdef = target ? catalog_.find(target->defId) : nullptr;
+      if (tdef == nullptr || e.connectorIndex >= tdef->connectionPoints.size()) continue;
+      const ConnectionPoint& tp = tdef->connectionPoints[e.connectorIndex];
+      if (isConnectorLinked(*target, tp.id)) continue;  // target already occupied
+      if (!connectorsCompatible(np, tp)) continue;       // type tags incompatible
+      out.push_back(SnapLink{npWorld, e.world});
+    }
+  }
+  return out;
+}
+
 bool EditorState::rotateSelected(Vec3 worldAxis) {
   if (!selected_) return false;
   const PlacedModule* m = station_.find(*selected_);
@@ -310,7 +363,7 @@ void EditorState::updateGizmoHover(Vec3 rayOriginX4, Vec3 rayDirX4, double gizmo
   const PlacedModule* m = station_.find(*selected_);
   if (m == nullptr) return;
   const GizmoModel g = gizmoModel(m->worldTransform.position, gizmoScale);
-  hoveredHandle_ = gizmoPick(g, rayOriginX4, rayDirX4);
+  hoveredHandle_ = gizmoPick(g, rayOriginX4, rayDirX4, gizmoMode_);
 }
 
 std::optional<GizmoHandle> EditorState::highlightHandle() const {

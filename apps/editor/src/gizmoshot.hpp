@@ -10,4 +10,9 @@ namespace x4sb::editor {
 
 int runGizmoShot(const std::string& outPrefix);
 
+// Ground-truth diagnostic: replays a real zoom gesture through the editor's own orbit
+// camera + gizmoScaleFor + raylib GetWorldToScreen and prints the gizmo's true pixel
+// size per step. No screenshots — pure measurement of "does the handle stay constant?".
+int runGizmoSweep();
+
 }  // namespace x4sb::editor

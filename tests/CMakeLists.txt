@@ -10,6 +10,7 @@ add_executable(x4sb_tests
   editorcore_test.cpp
   mesh_paths_test.cpp
   gizmo_test.cpp
+  gizmo_screen_size_test.cpp
   archive_test.cpp
   assetpipe_test.cpp
   xmf_test.cpp

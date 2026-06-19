@@ -121,6 +121,37 @@ void drawOneConnector(Vec3 world, Vec3 normal, bool linked, bool lit) {
   DrawLine3D(toRl(world), toRl(world + normal * 80.0), c);  // X4 scale normal stub
 }
 
+// Dashed 3D segment: alternate dash/gap along a->b. The dash count is capped so a
+// long span can't explode the draw-call count.
+void drawDashedLine3D(Vec3 a, Vec3 b, ::Color color, double dashLen, double gapLen) {
+  const Vec3 span = b - a;
+  const double total = length(span);
+  if (total < 1e-6) return;
+  const Vec3 dir = span * (1.0 / total);
+  const double stride = dashLen + gapLen;
+  constexpr int kMaxDashes = 64;
+  double s = 0.0;
+  for (int i = 0; i < kMaxDashes && s < total; ++i, s += stride) {
+    const double e = std::min(s + dashLen, total);
+    DrawLine3D(toRl(a + dir * s), toRl(a + dir * e), color);
+  }
+}
+
+// The about-to-snap connector pair: a dashed guide-line + endpoint spheres shown
+// during the approach (before the instant magnetic snap coincides them). Skipped
+// once coincident. Drawn inside the scene flip, like the gizmo/connectors.
+void drawSnapLink(const EditorState& state) {
+  // One dashed cyan guide-line per possible snap (active connector -> target), each
+  // skipped once coincident (already snapped). Distinct cyan vs the orange connectors.
+  constexpr ::Color kSnap{80, 230, 255, 255};
+  for (const SnapLink& link : state.activeSnapLinks()) {
+    if (length(link.toWorld - link.fromWorld) < 1.0) continue;  // coincident: snapped
+    drawDashedLine3D(link.fromWorld, link.toWorld, kSnap, 60.0, 40.0);
+    DrawSphere(toRl(link.fromWorld), 28.0F, kSnap);
+    DrawSphere(toRl(link.toWorld), 28.0F, kSnap);
+  }
+}
+
 // A connector is bright (lit) if it belongs to the selected module, if there is no
 // active ghost/selection context (tests/debug), or if it is within 1000 units of
 // the active module's AABB.
@@ -437,7 +468,6 @@ void drawPlacedModules(const Station& station, const ModuleCatalog& catalog,
         const ModuleDef* def = pm ? catalog.find(pm->defId) : nullptr;
         if (def != nullptr) {
           drawConnectors(*def, *pm, xfFor(*pm, true), activeAabb, selected);
-          if (showGizmos) drawAxisGizmo(*def, xfFor(*pm, true));
         }
       }
       if (activeAabb && grid != nullptr) {
@@ -654,13 +684,14 @@ void drawScene(const EditorState& state, const ::Camera3D& camera, MeshCache& me
           showMeshes && drawModuleMeshes(*gdef, state.ghost()->worldTransform, meshes, edge);
       rlDisableBackfaceCulling();
       if (!drew) drawModuleBox(*gdef, state.ghost()->worldTransform, fill, edge);
-      if (showGizmos) drawAxisGizmo(*gdef, state.ghost()->worldTransform);
     }
   }
 
   // Translate gizmo + drag preview last, inside the scene's global flip (its
   // axes are X4-native, like every other primitive here), before endScene().
   drawTranslateGizmo(state, camera);
+
+  drawSnapLink(state);
 
   endScene();
 }
@@ -669,97 +700,99 @@ void drawTranslateGizmo(const EditorState& state, const ::Camera3D& camera) {
   if (!state.selected()) return;
   const PlacedModule* m = state.station().find(*state.selected());
   if (m == nullptr) return;
-  // Gizmo follows the live drag preview when dragging, else the module origin.
   const std::optional<Transform> preview = state.dragPreview();
   const Vec3 origin = preview ? preview->position : m->worldTransform.position;
   const double scale = gizmoScaleFor(camera, state);
   const GizmoModel g = gizmoModel(origin, scale);
+  const GizmoMode mode = state.gizmoMode();
 
   const std::optional<GizmoHandle> hl = state.highlightHandle();
   const ::Color kHi{255, 255, 160, 255};  // hovered/active handle lights up
   const ::Vector3 o = toRl(g.origin);
 
-  // Axis arrows: a solid cylinder shaft + a cone tip, so the handle reads in 3D
-  // and the click target is obvious (thin lines were the clunk). The hovered or
-  // dragged axis highlights.
-  const double headLen = 0.28 * g.axisLength;
-  const float shaftR = static_cast<float>(0.022 * g.axisLength);
-  const float headR = static_cast<float>(0.065 * g.axisLength);
-  struct AxisVis {
-    GizmoHandle handle;
-    ::Color color;
-  };
-  const std::array<AxisVis, 3> axes{{
-      {GizmoHandle::AxisX, RED},
-      {GizmoHandle::AxisY, GREEN},
-      {GizmoHandle::AxisZ, BLUE},
-  }};
-  for (const AxisVis& a : axes) {
-    const ::Color col = (hl && *hl == a.handle) ? kHi : a.color;
-    const Vec3 dir = gizmoAxisDir(a.handle);
-    const ::Vector3 neck = toRl(g.origin + dir * (g.axisLength - headLen));
-    const ::Vector3 tip = toRl(g.origin + dir * g.axisLength);
-    DrawCylinderEx(o, neck, shaftR, shaftR, 10, col);  // shaft
-    DrawCylinderEx(neck, tip, headR, 0.0F, 12, col);   // arrowhead
+  // X-ray: handles always draw over module geometry so they are never buried in a
+  // large mesh. Flush the batch before/after toggling so only gizmo primitives skip
+  // the depth test; depth WRITE is untouched.
+  rlDrawRenderBatchActive();
+  rlDisableDepthTest();
+
+  if (mode == GizmoMode::Translate) {
+    // Axis arrows: solid cylinder shaft + cone tip; hovered/dragged axis highlights.
+    const double headLen = 0.28 * g.axisLength;
+    const float shaftR = static_cast<float>(0.022 * g.axisLength);
+    const float headR = static_cast<float>(0.065 * g.axisLength);
+    struct AxisVis {
+      GizmoHandle handle;
+      ::Color color;
+    };
+    const std::array<AxisVis, 3> axes{{
+        {GizmoHandle::AxisX, RED},
+        {GizmoHandle::AxisY, GREEN},
+        {GizmoHandle::AxisZ, BLUE},
+    }};
+    for (const AxisVis& a : axes) {
+      const ::Color col = (hl && *hl == a.handle) ? kHi : a.color;
+      const Vec3 dir = gizmoAxisDir(a.handle);
+      const ::Vector3 neck = toRl(g.origin + dir * (g.axisLength - headLen));
+      const ::Vector3 tip = toRl(g.origin + dir * g.axisLength);
+      DrawCylinderEx(o, neck, shaftR, shaftR, 10, col);  // shaft
+      DrawCylinderEx(neck, tip, headR, 0.0F, 12, col);   // arrowhead
+    }
+
+    // Plane handles: filled translucent quad over the pickable 0..planeSize region,
+    // only the two OUTER edges outlined (inner two would double the arrows).
+    struct PlaneVis {
+      GizmoHandle handle;
+      Vec3 u;
+      Vec3 v;
+      ::Color color;
+    };
+    const std::array<PlaneVis, 3> planes{{
+        {GizmoHandle::PlaneXY, {1, 0, 0}, {0, 1, 0}, BLUE},
+        {GizmoHandle::PlaneYZ, {0, 1, 0}, {0, 0, 1}, RED},
+        {GizmoHandle::PlaneZX, {0, 0, 1}, {1, 0, 0}, GREEN},
+    }};
+    for (const PlaneVis& p : planes) {
+      const bool hot = hl && *hl == p.handle;
+      const ::Color edge = hot ? kHi : p.color;
+      const ::Color fill{edge.r, edge.g, edge.b, static_cast<unsigned char>(hot ? 130 : 60)};
+      const ::Vector3 a = toRl(g.origin + p.u * g.planeSize);
+      const ::Vector3 corner = toRl(g.origin + (p.u + p.v) * g.planeSize);
+      const ::Vector3 c = toRl(g.origin + p.v * g.planeSize);
+      DrawTriangle3D(o, a, corner, fill);
+      DrawTriangle3D(o, corner, c, fill);
+      DrawLine3D(a, corner, edge);
+      DrawLine3D(corner, c, edge);
+    }
+
+    // Center free-translate handle: semi-transparent sphere so it no longer blocks
+    // the part origin (was a solid white ball).
+    const ::Color centerCol = (hl && *hl == GizmoHandle::Center) ? kHi : ::Color{255, 255, 255, 120};
+    DrawSphere(o, static_cast<float>(g.centerPickRadius), centerCol);
+  } else {
+    // Rotation rings: one clean circle per axis, in the plane normal to that axis.
+    struct RingVis {
+      GizmoHandle handle;
+      ::Vector3 tiltAxis;
+      float tiltDeg;
+      ::Color color;
+    };
+    const std::array<RingVis, 3> rings{{
+        {GizmoHandle::RotX, ::Vector3{0, 1, 0}, 90.0F, RED},    // ring in YZ plane
+        {GizmoHandle::RotY, ::Vector3{1, 0, 0}, 90.0F, GREEN},  // ring in XZ plane
+        {GizmoHandle::RotZ, ::Vector3{0, 0, 1}, 0.0F, BLUE},    // ring in XY plane
+    }};
+    for (const RingVis& rv : rings) {
+      const ::Color col = (hl && *hl == rv.handle) ? kHi : rv.color;
+      DrawCircle3D(o, static_cast<float>(g.ringRadius), rv.tiltAxis, rv.tiltDeg, col);
+    }
   }
 
-  // Plane handles: a small filled translucent quad over the pickable 0..planeSize
-  // region (the recognizable plane-drag affordance), coloured by the axis it is
-  // normal to; the hovered one highlights. Only the two OUTER edges are outlined —
-  // the inner two would lie ON the X/Y/Z axes and just double the arrows (the
-  // user's "redundant axis lines"). Backface culling is disabled at gizmo-draw
-  // time, so a single winding per triangle shows from both sides.
-  struct PlaneVis {
-    GizmoHandle handle;
-    Vec3 u;
-    Vec3 v;
-    ::Color color;
-  };
-  const std::array<PlaneVis, 3> planes{{
-      {GizmoHandle::PlaneXY, {1, 0, 0}, {0, 1, 0}, BLUE},
-      {GizmoHandle::PlaneYZ, {0, 1, 0}, {0, 0, 1}, RED},
-      {GizmoHandle::PlaneZX, {0, 0, 1}, {1, 0, 0}, GREEN},
-  }};
-  for (const PlaneVis& p : planes) {
-    const bool hot = hl && *hl == p.handle;
-    const ::Color edge = hot ? kHi : p.color;
-    const ::Color fill{edge.r, edge.g, edge.b, static_cast<unsigned char>(hot ? 130 : 60)};
-    const ::Vector3 a = toRl(g.origin + p.u * g.planeSize);
-    const ::Vector3 corner = toRl(g.origin + (p.u + p.v) * g.planeSize);
-    const ::Vector3 c = toRl(g.origin + p.v * g.planeSize);
-    DrawTriangle3D(o, a, corner, fill);
-    DrawTriangle3D(o, corner, c, fill);
-    DrawLine3D(a, corner, edge);
-    DrawLine3D(corner, c, edge);
-  }
+  rlDrawRenderBatchActive();
+  rlEnableDepthTest();
 
-  // Rotation rings: one clean circle per axis, in the plane normal to that axis,
-  // at ringRadius. The rings are large, so a single line reads fine; the hovered/
-  // active ring highlights. (DrawCircle3D draws the default XY circle tilted by
-  // axis+angle.)
-  struct RingVis {
-    GizmoHandle handle;
-    ::Vector3 tiltAxis;
-    float tiltDeg;
-    ::Color color;
-  };
-  const std::array<RingVis, 3> rings{{
-      {GizmoHandle::RotX, ::Vector3{0, 1, 0}, 90.0F, RED},    // ring in YZ plane
-      {GizmoHandle::RotY, ::Vector3{1, 0, 0}, 90.0F, GREEN},  // ring in XZ plane
-      {GizmoHandle::RotZ, ::Vector3{0, 0, 1}, 0.0F, BLUE},    // ring in XY plane
-  }};
-  for (const RingVis& rv : rings) {
-    const ::Color col = (hl && *hl == rv.handle) ? kHi : rv.color;
-    DrawCircle3D(o, static_cast<float>(g.ringRadius), rv.tiltAxis, rv.tiltDeg, col);
-  }
-
-  // Center free-translate handle: a small white sphere at the origin
-  const ::Color centerCol = (hl && *hl == GizmoHandle::Center) ? kHi : WHITE;
-  DrawSphere(o, static_cast<float>(g.centerPickRadius), centerCol);
-
-  // The selected module's real mesh now tracks the drag preview pose live (see
-  // drawPlacedModules' selectedPreview), so no AABB-box ghost is drawn here — the
-  // mesh itself IS the feedback.
+  // The selected module's real mesh tracks the drag preview pose live (see
+  // drawPlacedModules' selectedPreview), so no AABB-box ghost is drawn here.
 }
 
 void drawScene(const Station& station, const ModuleCatalog& catalog, const ::Camera3D& camera,
@@ -799,7 +832,7 @@ void drawHud(const EditorState& state, int screenWidth, int /*screenHeight*/, bo
       "[ / ]=cycle  1=Prod 2=Stor 3=Hab 4=Dock 5=Def 6=Conn 7=Other  0=all  G=gizmos  M=mesh/box",
       12, 78, 14, GRAY);
   DrawText(
-      "LMB=place/select/drag-gizmo   Q=build/select   R/Shift+R/Ctrl+R=rotate   Alt=free   Del/X=delete   Ctrl+Z/Y=undo/redo   RMB=orbit   wheel=zoom   F=frame",
+      "LMB=place/select/drag-gizmo   Q=build/select   T/Y=move/rotate gizmo   R/Shift+R/Ctrl+R=rotate   Alt=free   Del/X=delete   Ctrl+Z/Y=undo/redo   RMB=orbit   wheel=zoom   F=frame",
       12, 96, 14, GRAY);
 
   DrawFPS(screenWidth - 90, 10);

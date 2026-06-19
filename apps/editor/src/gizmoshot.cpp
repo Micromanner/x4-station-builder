@@ -1,7 +1,8 @@
 #include "gizmoshot.hpp"
 
 #include "app_paths.hpp"
-#include "input.hpp"  // gizmoScaleFor
+#include "camera_math.hpp"  // zoomTowardCursor, cameraBasis
+#include "input.hpp"        // gizmoScaleFor
 #include "mesh_cache.hpp"
 #include "raylib_convert.hpp"  // toRl
 #include "render.hpp"
@@ -72,6 +73,106 @@ void shoot(const EditorState& state, const ::Camera3D& camera, MeshCache& meshes
 }
 
 }  // namespace
+
+// Build the editor's orbit ::Camera3D for a given pose (mirrors OrbitCamera::rebuild
+// + the fovy=60 perspective set in OrbitCamera's ctor).
+[[nodiscard]] ::Camera3D orbitCam(::Vector3 target, double dist, double yaw, double pitch) {
+  const double cp = std::cos(pitch);
+  return ::Camera3D{
+      ::Vector3{target.x + static_cast<float>(dist * cp * std::sin(yaw)),
+                target.y + static_cast<float>(dist * std::sin(pitch)),
+                target.z + static_cast<float>(dist * cp * std::cos(yaw))},
+      target, ::Vector3{0.0F, 1.0F, 0.0F}, 60.0F, CAMERA_PERSPECTIVE};
+}
+
+// The gizmo's true on-screen size: the longest axis arm in PIXELS, measured with
+// raylib's own GetWorldToScreen (the exact projection the GPU uses). The handle is
+// drawn at module.position + axisDir*scale (X4-native) inside the (1,1,-1) scene
+// flip, so its rendered position is flipZ(...) — project that.
+[[nodiscard]] double gizmoArmPixels(const EditorState& state, const ::Camera3D& cam, double scale) {
+  const PlacedModule* m = state.station().find(*state.selected());
+  const Vec3 o = m->worldTransform.position;
+  const ::Vector2 po = GetWorldToScreen(toRl(flipZ(o)), cam);
+  double maxd = 0.0;
+  for (const GizmoHandle h : {GizmoHandle::AxisX, GizmoHandle::AxisY, GizmoHandle::AxisZ}) {
+    const ::Vector2 pt = GetWorldToScreen(toRl(flipZ(o + gizmoAxisDir(h) * scale)), cam);
+    maxd = std::max(maxd, static_cast<double>(Vector2Distance(po, pt)));
+  }
+  return maxd;
+}
+
+// Replay a real zoom gesture through the editor's own camera + gizmoScaleFor + raylib
+// projection, logging the gizmo's true pixel size at each step. `cursorNdcX` parks the
+// mouse at a fixed screen offset while wheeling (0 == centred). This is the ground-truth
+// measurement of "does the handle stay the same size as I zoom?".
+void sweep(const EditorState& state, ::Vector3 moduleDisp, double cursorNdcX, double wheel,
+           const char* label) {
+  constexpr double kTanHalfFov = 0.5773502691896257;  // tan(60deg/2)
+  const double aspect = static_cast<double>(GetScreenWidth()) / GetScreenHeight();
+  const double yaw = 0.6;
+  const double pitch = 0.45;
+  ::Vector3 target = moduleDisp;
+  double distance = 40.0;
+  std::printf("\n[%s] cursorNdcX=%.2f wheel=%+.0f  (orbit fovy=60, %dx%d)\n", label, cursorNdcX,
+              wheel, GetScreenWidth(), GetScreenHeight());
+  std::printf("  %9s %9s %9s %9s %9s\n", "dist", "depth", "eyeDist", "scale", "armPx");
+  double minPx = 1e30;
+  double maxPx = 0.0;
+  for (int step = 0; step < 80; ++step) {  // ~80 steps reaches the 40000 zoom clamp ("fully out")
+    const ::Camera3D cam = orbitCam(target, distance, yaw, pitch);
+    const double scale = gizmoScaleFor(cam, state);
+    const ::Vector3 fwd = Vector3Normalize(Vector3Subtract(cam.target, cam.position));
+    const double depth = static_cast<double>(
+        Vector3DotProduct(Vector3Subtract(moduleDisp, cam.position), fwd));
+    const double eyeDist = static_cast<double>(Vector3Distance(cam.position, moduleDisp));
+    const double armPx = gizmoArmPixels(state, cam, scale);
+    std::printf("  %9.1f %9.1f %9.1f %9.1f %9.1f\n", distance, depth, eyeDist, scale, armPx);
+    minPx = std::min(minPx, armPx);
+    maxPx = std::max(maxPx, armPx);
+
+    const x4sb::editor::CameraBasis basis =
+        x4sb::editor::cameraBasis(toVec3(cam.target) - toVec3(cam.position), Vec3{0, 1, 0});
+    const Vec3 rayDir = x4sb::editor::normalized(
+        basis.forward + basis.right * (cursorNdcX * kTanHalfFov * aspect));
+    const double k = 1.0 - wheel * 0.1;
+    const x4sb::editor::ZoomResult z = x4sb::editor::zoomTowardCursor(
+        toVec3(cam.target), distance, basis.forward, toVec3(cam.position), rayDir, k, 2.0, 40000.0);
+    target = toRl(z.target);
+    distance = z.distance;
+  }
+  std::printf("  armPx range: %.1f .. %.1f  (ratio %.2fx)\n", minPx, maxPx, maxPx / minPx);
+}
+
+int runGizmoSweep() {
+  const std::optional<std::string> catalogPath = findCatalogJson();
+  if (!catalogPath) {
+    std::fprintf(stderr, "gizmosweep: no catalog.json\n");
+    return 1;
+  }
+  std::optional<ModuleCatalog> catalog = ModuleCatalog::loadFromFile(*catalogPath);
+  if (!catalog) {
+    std::fprintf(stderr, "gizmosweep: failed to load catalog\n");
+    return 1;
+  }
+  InitWindow(kScreenW, kScreenH, "gizmosweep");
+  {
+    EditorState state(*catalog);
+    Station station;
+    PlacedModule pm;
+    pm.instanceId = 1;
+    pm.defId = catalog->all().begin()->first;  // any module; gizmo size is module-independent
+    station.add(pm);
+    state.loadStation(std::move(station));
+    state.selectByRay(Vec3{0, 1e6, 0}, Vec3{0, -1, 0});
+
+    const ::Vector3 moduleDisp = toRl(flipZ(Vec3{0, 0, 0}));  // module at origin
+    sweep(state, moduleDisp, /*cursorNdcX=*/0.0, /*wheel=*/-1.0, "zoom OUT, cursor centred");
+    sweep(state, moduleDisp, /*cursorNdcX=*/0.30, /*wheel=*/-1.0, "zoom OUT, cursor 30% off");
+    sweep(state, moduleDisp, /*cursorNdcX=*/0.0, /*wheel=*/+1.0, "zoom IN, cursor centred");
+  }
+  CloseWindow();
+  return 0;
+}
 
 int runGizmoShot(const std::string& outPrefix) {
   const std::optional<std::string> catalogPath = findCatalogJson();

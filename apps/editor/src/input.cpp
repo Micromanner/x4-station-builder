@@ -9,6 +9,7 @@
 
 #include <array>
 #include <cstddef>
+#include <limits>
 #include <optional>
 
 namespace x4sb::editor {
@@ -66,22 +67,38 @@ void handleKeys(EditorState& state) {
   // there is no ghost, so a left-click selects a module you already built — then
   // press Q again to keep building onto it.
   if (IsKeyPressed(KEY_Q)) state.togglePlacement();
+
+  // Gizmo mode: T = Translate (arrows/planes), Y = Rotate (rings). Guarded against
+  // Ctrl so Ctrl+Y (redo) does not also switch mode.
+  if (!ctrl && IsKeyPressed(KEY_T)) state.setGizmoMode(GizmoMode::Translate);
+  if (!ctrl && IsKeyPressed(KEY_Y)) state.setGizmoMode(GizmoMode::Rotate);
 }
 
 double gizmoScaleFor(const ::Camera3D& camera, const EditorState& state) {
-  constexpr double kDefault = 5.0;
+  constexpr double kDefault = 50.0;
   if (!state.selected()) return kDefault;
   const PlacedModule* m = state.station().find(*state.selected());
   if (m == nullptr) return kDefault;
+  // Camera-space depth to the module gives a constant on-screen size; the module's OWN
+  // Euclidean eye distance is the collapse floor (NOT the orbit distance, which would make
+  // the size track the zoom pivot). The math lives in editorcore::gizmoScale, shared with
+  // the hit-test path.
   const ::Vector3 mp = toRl(flipZ(m->worldTransform.position));  // display space
+  const ::Vector3 fwd = Vector3Normalize(Vector3Subtract(camera.target, camera.position));
+  const double depth =
+      static_cast<double>(Vector3DotProduct(Vector3Subtract(mp, camera.position), fwd));
   const double dist = static_cast<double>(Vector3Distance(camera.position, mp));
-  // Track the module's size (clamped to a screen-relative min/max) so the gizmo
-  // looks anchored to the module rather than growing on zoom-out. The clamp math
-  // lives in editorcore (gizmoScale) so it is unit-tested and shared with the
-  // hit-test path.
-  const ModuleDef* def = state.defFor(m->defId);
-  const double radius = def != nullptr ? length(def->aabb.max - def->aabb.min) * 0.5 : kDefault;
-  return gizmoScale(radius, dist);
+  // Cap the handle to the module's own size so it isn't swallowed by a constant-pixel handle
+  // when the part is small/far (zoomed out) — past the cap it shrinks with the part. The cap
+  // is module-relative (not a fixed world constant) because X4 parts span tiny connectors to
+  // km-scale hulls. kMaxModuleRadii is a pure visual tuning knob (how many bounding-sphere
+  // radii the arms may reach before they stop growing).
+  constexpr double kMaxModuleRadii = 1.5;
+  const ModuleDef* def = state.catalog().find(m->defId);
+  const double maxScale = def != nullptr
+                              ? length(def->aabb.max - def->aabb.min) * 0.5 * kMaxModuleRadii
+                              : std::numeric_limits<double>::infinity();
+  return gizmoScale(depth, dist, maxScale);
 }
 
 void handleMouse(EditorState& state, const ::Camera3D& camera) {

@@ -100,6 +100,9 @@ int main(int argc, char** argv) {
     if (std::string(argv[i]) == "--gizmoshot") {
       return x4sb::editor::runGizmoShot(std::string(argv[i + 1]));
     }
+    if (std::string(argv[i]) == "--gizmosweep") {
+      return x4sb::editor::runGizmoSweep();
+    }
     if (std::string(argv[i]) == "--profile" && i + 2 < argc) {
       return x4sb::editor::runProfile(std::string(argv[i + 1]), std::atoi(argv[i + 2]));
     }
