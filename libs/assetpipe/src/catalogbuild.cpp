@@ -126,11 +126,12 @@ CatalogBuildResult buildModuleCatalog(const ExtractFn& extract,
         d.id = rm.id;
         d.wareId = rm.ware->wareId;
         d.nameRef = rm.ware->nameRef;
-        d.name = text.resolveRef(d.nameRef).value_or("");
-        if (d.name.empty())
-          ++res.namesUnresolved;
-        else
+        if (const std::optional<std::string> name = text.resolveRef(d.nameRef)) {
+          d.name = *name;  // d.name stays empty (UI falls back to id) when unresolved
           ++res.namesResolved;
+        } else {
+          ++res.namesUnresolved;
+        }
         d.faction = rm.macro->makerRace;
         d.category = rm.macro->category;
         d.playerBuildable = rm.ware->playerBuildable;

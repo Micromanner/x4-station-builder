@@ -16,6 +16,10 @@ std::uint64_t makeKey(long page, long id) {
   return static_cast<std::uint64_t>(page) * kPageStride + static_cast<std::uint64_t>(id);
 }
 
+// A text id must stay below the page stride, else makeKey would alias it into
+// the next page's keyspace. The single guard for the page*stride+id key scheme.
+bool idInRange(long id) { return static_cast<std::uint64_t>(id) < kPageStride; }
+
 // Parse a single non-negative integer that fills the whole view (no spaces/sign).
 bool parseInt(std::string_view s, long& out) {
   // std::from_chars takes raw pointers; that's the entire API surface (C++17).
@@ -25,8 +29,7 @@ bool parseInt(std::string_view s, long& out) {
   return ec == std::errc{} && ptr == end && out >= 0;
 }
 
-// Parse "{page,id}" into two non-negative ints. false on any other shape.
-// id >= kPageStride is also rejected: it would alias into the next page's keyspace.
+// Parse "{page,id}" into two non-negative, in-range ints. false on any other shape.
 bool parseRef(std::string_view ref, long& page, long& id) {
   if (ref.size() < 2 || ref.front() != '{' || ref.back() != '}') return false;
   const std::string_view inner = ref.substr(1, ref.size() - 2);
@@ -34,7 +37,7 @@ bool parseRef(std::string_view ref, long& page, long& id) {
   if (comma == std::string_view::npos) return false;
   if (!parseInt(inner.substr(0, comma), page) || !parseInt(inner.substr(comma + 1), id))
     return false;
-  return static_cast<std::uint64_t>(id) < kPageStride;
+  return idInRange(id);
 }
 
 // Collapse internal whitespace runs to one space and trim the ends.
@@ -68,8 +71,7 @@ void TextDatabase::merge(std::string_view l044Xml) {
     for (const pugi::xml_node t : page.children("t")) {
       long textId = 0;
       if (!parseInt(t.attribute("id").value(), textId)) continue;
-      // id >= kPageStride would alias into the next page's keyspace; skip it.
-      if (static_cast<std::uint64_t>(textId) >= kPageStride) continue;
+      if (!idInRange(textId)) continue;  // out-of-range id would alias another page
       entries_[makeKey(pageId, textId)] = t.text().get();
     }
   }
@@ -117,8 +119,7 @@ std::optional<std::string> TextDatabase::resolve(long page, long id, int depth) 
         ++i;
         continue;
       }
-      const std::string_view inner(
-          raw.data() + i, end - i + 1);  // NOLINT(cppcoreguidelines-pro-bounds-pointer-arithmetic)
+      const std::string_view inner = std::string_view(raw).substr(i, end - i + 1);
       long p = 0;
       long t = 0;
       if (parseRef(inner, p, t)) {
