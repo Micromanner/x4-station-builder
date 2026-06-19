@@ -111,6 +111,80 @@ ExtractFn makeMultiSourceInstall() {
 }
 }  // namespace
 
+namespace {
+// A fake install: one dock module with a dockingbay child macro so the catalog
+// builder exercises extractClearanceVolumes on the real walk path.
+ExtractFn makeDockInstall() {
+  auto files = std::make_shared<std::unordered_map<std::string, std::string>>();
+  (*files)["libraries/wares.xml"] = R"(<wares>
+    <ware id="module_arg_dock_01" name="{1,100}" tags="module">
+      <component ref="dock_test_macro"/>
+    </ware>
+  </wares>)";
+  (*files)["index/macros.xml"] = R"(<index>
+    <entry name="dock_test_macro" value="m/dock_macro"/>
+    <entry name="dockingbay_test_l_macro" value="m/db_macro"/>
+  </index>)";
+  (*files)["index/components.xml"] = R"(<index>
+    <entry name="dock_test_comp" value="c/dock_comp"/>
+  </index>)";
+  (*files)["m/dock_macro.xml"] = R"(<macros>
+    <macro name="dock_test_macro" class="buildmodule">
+      <component ref="dock_test_comp"/>
+      <properties><identification makerrace="argon"/></properties>
+      <connections>
+        <connection ref="connection_dockingbay01">
+          <macro ref="dockingbay_test_l_macro" connection="con_component01"/>
+        </connection>
+      </connections>
+    </macro>
+  </macros>)";
+  (*files)["c/dock_comp.xml"] = R"(<components>
+    <component name="dock_test_comp" class="buildmodule">
+      <connections>
+        <connection name="connection_dockingbay01" tags="dock_l dockingbay">
+          <offset><position x="0" y="0" z="0"/></offset>
+        </connection>
+        <connection name="connection_launchpos01" tags="launchpos">
+          <offset><position x="0" y="0" z="0"/></offset>
+        </connection>
+        <connection name="connection_todock01" tags="todock">
+          <offset><position x="0" y="0" z="1200"/></offset>
+        </connection>
+        <connection name="Con_exclusionzone001" tags="exclusionzone ship_l">
+          <offset><position x="0" y="0" z="600"/></offset>
+        </connection>
+      </connections>
+    </component>
+  </components>)";
+  // The dockingbay child macro carries the <docksize> that names the ship class.
+  (*files)["m/db_macro.xml"] = R"(<macros>
+    <macro name="dockingbay_test_l_macro" class="dockingbay">
+      <properties><docksize tags="dock_l"/></properties>
+    </macro>
+  </macros>)";
+  return [files](const std::string& path) -> std::optional<std::string> {
+    const auto it = files->find(path);
+    if (it == files->end()) return std::nullopt;
+    return it->second;
+  };
+}
+}  // namespace
+
+TEST_CASE("buildModuleCatalog populates clearanceVolumes for dock modules") {
+  const CatalogBuildResult res = buildModuleCatalog(makeDockInstall(), {""});
+  REQUIRE(res.modules.size() == 1);
+  const ModuleDef& d = res.modules[0];
+  REQUIRE(d.clearanceVolumes.size() == 1);
+  CHECK(d.clearanceVolumes[0].shipSize == "l");
+  // Build module: the exclusionzone ship_l marker (z=600) is authoritative over the
+  // launchpos->todock corridor. ship_l box = 1200 x 1200 x 100000 (parameters.xml) ->
+  // half-depth 50000, centred 50 km outward of the marker (600 + 50000).
+  CHECK(d.clearanceVolumes[0].halfExtents.z == doctest::Approx(50000));
+  CHECK(d.clearanceVolumes[0].halfExtents.x == doctest::Approx(600));
+  CHECK(d.clearanceVolumes[0].center.z == doctest::Approx(50600));
+}
+
 TEST_CASE("buildModuleCatalog merges base and DLC overlays") {
   const CatalogBuildResult res =
       buildModuleCatalog(makeMultiSourceInstall(), {"", "extensions/ego_dlc_test/"});

@@ -95,6 +95,16 @@ ModuleCatalog ModuleCatalog::loadFromJson(const std::string& text) {
         d.meshRefs.push_back(std::move(mr));
       }
     }
+    if (m.contains("clearanceVolumes")) {
+      for (const auto& v : m.at("clearanceVolumes")) {
+        ClearanceVolume cv;
+        cv.center = readVec3(v.value("center", json::array()));
+        cv.rotation = readQuat(v.value("rotation", json::array()));
+        cv.halfExtents = readVec3(v.value("halfExtents", json::array()));
+        cv.shipSize = v.value("shipSize", std::string{});
+        d.clearanceVolumes.push_back(std::move(cv));
+      }
+    }
     if (!d.id.empty()) cat.add(d);
   }
   return cat;
@@ -147,6 +157,15 @@ std::string toCatalogJson(const std::vector<ModuleDef>& modules) {
                         {"rotation", writeQuat(r.localTransform.rotation)}}}});
     }
     m["meshRefs"] = std::move(refs);
+
+    json vols = json::array();
+    for (const ClearanceVolume& v : d.clearanceVolumes) {
+      vols.push_back({{"center", writeVec3(v.center)},
+                      {"rotation", writeQuat(v.rotation)},
+                      {"halfExtents", writeVec3(v.halfExtents)},
+                      {"shipSize", v.shipSize}});
+    }
+    m["clearanceVolumes"] = std::move(vols);
     mods.push_back(std::move(m));
   }
   return json{{"modules", std::move(mods)}}.dump(2);

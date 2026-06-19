@@ -403,7 +403,9 @@ TEST_CASE("EditorState rebuilds the connector grid after a placement") {
   CHECK(afterFirst == 1);
 
   // A second placement must dirty + rebuild the grid (not return the cached size).
-  state.updateGhost(Vec3{0, 0, 0}, Vec3{0, 0, 1}, /*forceFree=*/true);
+  // Place far away so the collision check doesn't block it (this test is about
+  // grid invalidation, not collision).
+  state.updateGhost(Vec3{100, 0, 0}, Vec3{0, 0, 1}, /*forceFree=*/true);
   REQUIRE(state.commitGhost().has_value());
   CHECK(state.connectorGrid().size() == afterFirst + 1);
 }
@@ -525,5 +527,77 @@ TEST_CASE("activeSnapLinks: empty when far, empty with no ghost/drag") {
   s.setPlaceDistance(5000.0);
   s.updateGhost(Vec3{1, 0, 0}, Vec3{0, 0, 1}, /*forceFree=*/true);  // b1 ~5000 away
   CHECK(s.activeSnapLinks().empty());  // beyond lineRadius_
+}
+
+TEST_CASE("dock clearance always blocks placement, even with overlap allowed") {
+  ModuleCatalog c;
+  ModuleDef dock;
+  dock.id = "dock";
+  dock.category = Category::Dock;
+  dock.aabb = AABB{{-1, -1, -1}, {1, 1, 1}};
+  ClearanceVolume cv;
+  cv.rotation = Quat{};
+  cv.halfExtents = {5, 5, 50};
+  cv.center = {0, 0, 50};  // corridor z[0,100], clear of the dock body at z[-1,1]
+  cv.shipSize = "dock_m";
+  dock.clearanceVolumes.push_back(cv);
+  c.add(dock);
+  ModuleDef box;
+  box.id = "box";
+  box.category = Category::Storage;
+  box.aabb = AABB{{-2, -2, -2}, {2, 2, 2}};
+  c.add(box);
+
+  EditorState s(c);
+  // Place the dock at origin (free-place "dock" first).
+  while (s.activeDef()->id != "dock") s.cycleActive(1);
+  s.updateGhost(Vec3{0, 10, 0}, Vec3{0, -1, 0}, /*forceFree=*/true);
+  REQUIRE(s.commitGhost().has_value());
+
+  // Free-place "box" inside the dock's corridor at z~50 (clear of the dock body,
+  // so only clearance — not body overlap — can block it).
+  while (s.activeDef()->id != "box") s.cycleActive(1);
+  s.setPlaceDistance(50.0);
+  s.updateGhost(Vec3{0, 0, -1}, Vec3{0, 0, 1}, /*forceFree=*/true);  // standoff lands near z=49
+  REQUIRE(s.ghost().has_value());
+  CHECK_FALSE(s.ghost()->valid);  // blocked by clearance
+
+  // The overlap toggle relaxes body overlap only — clearance still blocks.
+  s.setAllowOverlap(true);
+  s.updateGhost(Vec3{0, 0, -1}, Vec3{0, 0, 1}, /*forceFree=*/true);
+  REQUIRE(s.ghost().has_value());
+  CHECK_FALSE(s.ghost()->valid);  // STILL blocked (clearance is not bypassed)
+}
+
+TEST_CASE("overlap is blocked by default and allowed by the toggle") {
+  const ModuleCatalog c = twoModuleCatalog();
+  EditorState s(c);  // active = a_mod (AABB +/-0.5)
+
+  // Place a_mod at the origin.
+  s.updateGhost(Vec3{0, 10, 0}, Vec3{0, -1, 0});
+  REQUIRE(s.commitGhost().has_value());
+
+  // Free-place another a_mod overlapping the first (ray down onto origin, Alt = forceFree).
+  s.updateGhost(Vec3{0, 10, 0}, Vec3{0, -1, 0}, /*forceFree=*/true);
+  REQUIRE(s.ghost().has_value());
+  CHECK_FALSE(s.ghost()->valid);            // overlaps -> invalid
+  CHECK_FALSE(s.commitGhost().has_value()); // commit rejected
+
+  s.setAllowOverlap(true);
+  CHECK(s.allowOverlap());
+  s.updateGhost(Vec3{0, 10, 0}, Vec3{0, -1, 0}, /*forceFree=*/true);
+  REQUIRE(s.ghost().has_value());
+  CHECK(s.ghost()->valid);                  // bypassed -> valid
+  CHECK(s.commitGhost().has_value());
+}
+
+TEST_CASE("showAllClearance is render-only state: defaults off, round-trips") {
+  const ModuleCatalog c;
+  EditorState s(c);
+  CHECK_FALSE(s.showAllClearance());
+  s.setShowAllClearance(true);
+  CHECK(s.showAllClearance());
+  s.setShowAllClearance(false);
+  CHECK_FALSE(s.showAllClearance());
 }
 

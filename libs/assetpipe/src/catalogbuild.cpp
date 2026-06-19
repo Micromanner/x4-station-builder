@@ -92,6 +92,12 @@ void forEachResolvedModule(const ExtractFn& extract,
     rm.ware = &w;
     rm.macro = &mi;
     rm.resolveComponentFolder = resolveFolder;
+    rm.macroXml = *macroXml;
+    rm.resolveMacroXml = [&macroIdx, &extract](const std::string& name) -> std::optional<std::string> {
+      const auto it = macroIdx.find(detail::toLower(name));
+      if (it == macroIdx.end()) return std::nullopt;
+      return extract(it->second);
+    };
     visit(rm);
   }
 }
@@ -125,6 +131,7 @@ CatalogBuildResult buildModuleCatalog(const ExtractFn& extract,
           mr.localTransform = p.offset;
           d.meshRefs.push_back(std::move(mr));
         }
+        d.clearanceVolumes = extractClearanceVolumes(rm.macroXml, rm.componentXml, rm.resolveMacroXml);
         res.modules.push_back(std::move(d));
       },
       res.skipped);

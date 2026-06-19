@@ -29,6 +29,17 @@ struct MeshRef {
   Transform localTransform{};  // a module may assemble several parts
 };
 
+// A synthesized dock/cradle clearance volume (design §4.1): an oriented box in
+// module-local space whose long (local Z) axis is the ship approach/launch
+// corridor. X4 ships no such box — it is reconstructed in the pipeline from the
+// dock connection pose, ship-size class, and corridor markers.
+struct ClearanceVolume {
+  Vec3 center{};
+  Quat rotation{};
+  Vec3 halfExtents{};
+  std::string shipSize;  // "dock_xs".."dock_xl" (provenance / future per-size rules)
+};
+
 struct ModuleDef {
   std::string id;       // macro name (catalog key; plans reference modules by macro)
   std::string name;     // display name (empty until the localization pass)
@@ -39,6 +50,7 @@ struct ModuleDef {
   bool playerBuildable{true};
   std::vector<ConnectionPoint> connectionPoints;
   std::vector<MeshRef> meshRefs;
+  std::vector<ClearanceVolume> clearanceVolumes;  // dock/cradle clear volumes (design §3.1)
   AABB aabb{};  // derived bounding box, in module-local space
 };
 

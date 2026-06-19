@@ -1,10 +1,14 @@
 #include "x4sb/assetpipe/component.hpp"
 
 #include "strutil.hpp"
+#include "x4sb/data/math.hpp"
 
 #include <pugixml.hpp>
 
 #include <algorithm>
+#include <array>
+#include <cmath>
+#include <functional>
 #include <sstream>
 #include <string_view>
 
@@ -66,6 +70,44 @@ void forEachComponentPart(const pugi::xml_node& comp, Fn fn) {
     const Transform offset = parseOffset(c);
     for (const pugi::xml_node part : c.child("parts").children("part")) fn(part, offset, tags);
   }
+}
+
+// Dock keep-clear box half-extents (metres) per ship class, from X4's
+// libraries/parameters.xml <exclusionzones>: there x/y are the full cross-section and
+// z the full outward length, so each is halved here. The module's exclusionzone
+// connection carries the matching ship_<size> tag; dock_<size> is accepted too for
+// the launch->todock fallback. L/XL run 100 km (the whole capital-ship flight path
+// out of the plot) while M and below are short — matching in-game measurement.
+struct ClearanceBox {
+  double halfW;
+  double halfH;
+  double halfDepth;
+  std::string label;
+};
+ClearanceBox clearanceBox(const std::string& tags) {
+  if (detail::hasToken(tags, "ship_xl") || detail::hasToken(tags, "dock_xl"))
+    return {2000, 2000, 50000, "xl"};  // 4000 x 4000 x 100000
+  if (detail::hasToken(tags, "ship_l") || detail::hasToken(tags, "dock_l"))
+    return {600, 600, 50000, "l"};  // 1200 x 1200 x 100000
+  if (detail::hasToken(tags, "ship_m") || detail::hasToken(tags, "dock_m"))
+    return {90, 90, 250, "m"};  // 180 x 180 x 500
+  if (detail::hasToken(tags, "ship_s") || detail::hasToken(tags, "dock_s"))
+    return {35, 35, 200, "s"};  // 70 x 70 x 400
+  if (detail::hasToken(tags, "ship_xs") || detail::hasToken(tags, "dock_xs"))
+    return {35, 35, 200, "xs"};  // 70 x 70 x 400
+  return {90, 90, 250, "m"};  // default to M-class when unclassified
+}
+
+// Unit quaternion rotating local +Z onto `dir` (unit). The clearance OBB's local
+// Z is its corridor (long) axis, so this orients a computed launch->dock corridor.
+Quat quatFromUnitZTo(Vec3 dir) {
+  const double d = dir.z;                          // dot({0,0,1}, dir)
+  if (d > 1.0 - 1e-9) return Quat{};               // already +Z
+  if (d < -1.0 + 1e-9) return Quat{0, 1, 0, 0};    // 180deg about X flips +Z to -Z
+  const Vec3 c = cross(Vec3{0, 0, 1}, dir);
+  const Quat q{1.0 + d, c.x, c.y, c.z};
+  const double n = std::sqrt(q.w * q.w + q.x * q.x + q.y * q.y + q.z * q.z);
+  return {q.w / n, q.x / n, q.y / n, q.z / n};
 }
 
 }  // namespace
@@ -225,6 +267,73 @@ MacroInfo parseMacro(const std::string& macroXml) {
   info.makerRace =
       macro.child("properties").child("identification").attribute("makerrace").as_string();
   return info;
+}
+
+std::string largestDockSize(const std::string& docksizeTags) {
+  static const std::array<const char*, 5> order{{"dock_xl", "dock_l", "dock_m", "dock_s", "dock_xs"}};
+  for (const char* s : order)
+    if (detail::hasToken(docksizeTags, s)) return s;
+  return {};
+}
+
+std::vector<ClearanceVolume> extractClearanceVolumes(
+    const std::string& macroXml, const std::string& componentXml,
+    const std::function<std::optional<std::string>(const std::string&)>& resolveMacroXml) {
+  // X4's authoritative no-build box is the module component's <connection
+  // tags="exclusionzone ship_<size>"> marker (piers, dockareas, build modules): the
+  // marker gives the pose, and libraries/parameters.xml <exclusionzones> gives the
+  // box dimensions per ship_<size> (see clearanceBox). Build modules ALSO carry
+  // launchpos/todock ship-pathing markers, but those are not the keep-clear box, so
+  // exclusionzone takes priority; the launch->todock corridor is only a fallback for
+  // docks that declare no exclusionzone. The macro/dockingbay chain isn't needed.
+  (void)macroXml;
+  (void)resolveMacroXml;  // reserved for a future surface-dock (no-marker) fallback
+  std::vector<ClearanceVolume> out;
+  const std::vector<ComponentConnection> conns = parseComponentConnections(componentXml);
+
+  // Authoritative path: one box per exclusionzone marker. The no-build zone starts AT
+  // the connection centre (the marker) and extends OUTWARD along the connection's
+  // local +Z — the side ships dock/approach from. (v1 ran origin->marker, i.e. inward
+  // over the structure; that was the wrong side.)
+  for (const ComponentConnection& c : conns) {
+    if (!detail::hasToken(c.tags, "exclusionzone")) continue;
+    const ClearanceBox cb = clearanceBox(c.tags);
+    const Vec3 outward = rotate(c.offset.rotation, Vec3{0, 0, 1});
+    ClearanceVolume cv;
+    cv.rotation = c.offset.rotation;
+    cv.halfExtents = {cb.halfW, cb.halfH, cb.halfDepth};
+    cv.center = c.offset.position + outward * cb.halfDepth;
+    cv.shipSize = cb.label;
+    out.push_back(std::move(cv));
+  }
+  if (!out.empty()) return out;
+
+  // Fallback for docks with no exclusionzone marker (small surface docks, S/M
+  // dockareas/dockingbays): a single modeled corridor spanning launchpos -> todock.
+  // These components carry no ship_/dock_ tag, so clearanceBox defaults to M; the
+  // corridor length is the modeled launch->dock distance rather than a class depth.
+  const ComponentConnection* todock = nullptr;
+  const ComponentConnection* launch = nullptr;
+  for (const ComponentConnection& c : conns) {
+    if (detail::hasToken(c.tags, "todock")) todock = &c;
+    if (detail::hasToken(c.tags, "launchpos")) launch = &c;
+  }
+  if (todock != nullptr && launch != nullptr) {
+    const ClearanceBox cb = clearanceBox("");
+    const Vec3 a = todock->offset.position;
+    const Vec3 b = launch->offset.position;
+    const Vec3 d = a - b;
+    const double len = length(d);
+    if (len > 1.0) {
+      ClearanceVolume cv;
+      cv.rotation = quatFromUnitZTo(d * (1.0 / len));
+      cv.halfExtents = {cb.halfW, cb.halfH, len * 0.5};
+      cv.center = (a + b) * 0.5;
+      cv.shipSize = cb.label;
+      out.push_back(std::move(cv));
+    }
+  }
+  return out;
 }
 
 }  // namespace x4sb

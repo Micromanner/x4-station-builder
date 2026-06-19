@@ -4,6 +4,7 @@
 // identity the data layer needs. Render-free; the pipeline.exe and tests share it.
 #include "x4sb/data/types.hpp"
 
+#include <functional>
 #include <optional>
 #include <string>
 #include <string_view>
@@ -100,5 +101,20 @@ MacroInfo parseMacro(const std::string& macroXml);
 
 // Map an X4 macro `class` string to our coarse Category.
 Category categoryFromClass(const std::string& className);
+
+// The largest dock-size class present in a <docksize tags="..."> string
+// ("dock_xl">"dock_l">"dock_m">"dock_s">"dock_xs"), or "" if none. (design §4.2)
+[[nodiscard]] std::string largestDockSize(const std::string& docksizeTags);
+
+// Synthesize a module's dock/cradle clearance volumes (design §4.2). The keep-clear
+// box is X4's <connection tags="exclusionzone ship_<size>"> marker: each marker's
+// pose gives an OBB along its outward local +Z, sized per ship class from
+// libraries/parameters.xml <exclusionzones>. Docks with no exclusionzone fall back to
+// a corridor spanning the launchpos->todock markers. `macroXml`/`resolveMacroXml`
+// (macro name -> XML bytes, nullopt if unindexed) are currently unused — reserved for
+// a future surface-dock fallback. Render-free.
+[[nodiscard]] std::vector<ClearanceVolume> extractClearanceVolumes(
+    const std::string& macroXml, const std::string& componentXml,
+    const std::function<std::optional<std::string>(const std::string&)>& resolveMacroXml);
 
 }  // namespace x4sb

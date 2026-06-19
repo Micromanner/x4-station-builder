@@ -68,6 +68,14 @@ void handleKeys(EditorState& state) {
   // press Q again to keep building onto it.
   if (IsKeyPressed(KEY_Q)) state.togglePlacement();
 
+  // O toggles Allow Module Overlap (bypass collision/clearance checks, mirroring
+  // X4's editor setting). O is free; Q/E/X/R/Z/WASD are taken.
+  if (IsKeyPressed(KEY_O)) state.setAllowOverlap(!state.allowOverlap());
+
+  // C toggles "show all flight corridors" (every dock's clearance volume, not just
+  // the selected/ghost module's). C is free.
+  if (IsKeyPressed(KEY_C)) state.setShowAllClearance(!state.showAllClearance());
+
   // Gizmo mode: T = Translate (arrows/planes), Y = Rotate (rings). Guarded against
   // Ctrl so Ctrl+Y (redo) does not also switch mode.
   if (!ctrl && IsKeyPressed(KEY_T)) state.setGizmoMode(GizmoMode::Translate);

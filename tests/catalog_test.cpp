@@ -52,3 +52,24 @@ TEST_CASE("loadFromJson defaults playerBuildable to true when absent") {
   REQUIRE(r != nullptr);
   CHECK(r->playerBuildable == true);
 }
+
+TEST_CASE("catalog JSON round-trips clearanceVolumes") {
+  ModuleDef d;
+  d.id = "dock_test";
+  ClearanceVolume cv;
+  cv.center = {1, 2, 3};
+  cv.rotation = {0, 0, 1, 0};  // 180deg about Y
+  cv.halfExtents = {45, 45, 600};
+  cv.shipSize = "dock_l";
+  d.clearanceVolumes.push_back(cv);
+
+  const std::string json = toCatalogJson({d});
+  const ModuleCatalog cat = ModuleCatalog::loadFromJson(json);
+  const ModuleDef* r = cat.find("dock_test");
+  REQUIRE(r != nullptr);
+  REQUIRE(r->clearanceVolumes.size() == 1);
+  CHECK(r->clearanceVolumes[0].center.z == doctest::Approx(3));
+  CHECK(r->clearanceVolumes[0].rotation.y == doctest::Approx(1));
+  CHECK(r->clearanceVolumes[0].halfExtents.z == doctest::Approx(600));
+  CHECK(r->clearanceVolumes[0].shipSize == "dock_l");
+}

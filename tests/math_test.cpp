@@ -80,6 +80,29 @@ TEST_CASE("axisAngle: +90 deg about +Y sends +X to -Z") {
   CHECK(r.z == doctest::Approx(-1).epsilon(1e-9));
 }
 
+TEST_CASE("overlapsObbAabb: axis-aligned, touching, separated, and rotated cases") {
+  const AABB unit{{-1, -1, -1}, {1, 1, 1}};  // centered at origin
+
+  // Concentric, axis-aligned OBB -> overlap.
+  CHECK(overlapsObbAabb(Obb{{0, 0, 0}, Quat{}, {1, 1, 1}}, unit));
+
+  // Far away on +X -> separated.
+  CHECK_FALSE(overlapsObbAabb(Obb{{10, 0, 0}, Quat{}, {1, 1, 1}}, unit));
+
+  // Axis-aligned, faces exactly touching at x=2 (gap 0) -> overlap (touching counts).
+  CHECK(overlapsObbAabb(Obb{{2, 0, 0}, Quat{}, {1, 1, 1}}, unit));
+
+  // Just past contact -> separated.
+  CHECK_FALSE(overlapsObbAabb(Obb{{2.001, 0, 0}, Quat{}, {1, 1, 1}}, unit));
+
+  // Unit cube rotated 45deg about Z: its projected half-width on X is sqrt(2)~1.414.
+  const Quat z45 = axisAngle(Vec3{0, 0, 1}, 0.7853981633974483);  // pi/4
+  // Center at 2.3: nearest reach 2.3-1.414=0.886 < 1 -> overlaps the unit box.
+  CHECK(overlapsObbAabb(Obb{{2.3, 0, 0}, z45, {1, 1, 1}}, unit));
+  // Center at 2.5: nearest reach 2.5-1.414=1.086 > 1; the X axis separates -> no overlap.
+  CHECK_FALSE(overlapsObbAabb(Obb{{2.5, 0, 0}, z45, {1, 1, 1}}, unit));
+}
+
 TEST_CASE("worldAabb rotates a box's hull conservatively") {
   const AABB local{{-1, -2, -3}, {1, 2, 3}};
 

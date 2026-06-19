@@ -107,4 +107,50 @@ inline AABB operator+(const AABB& b, Vec3 t) { return {b.min + t, b.max + t}; }
   return out;
 }
 
+// Oriented bounding box: half-extents about `center`, rotated by `rotation`.
+struct Obb {
+  Vec3 center{};
+  Quat rotation{};
+  Vec3 halfExtents{};
+};
+
+// Separating-axis test of an OBB against an axis-aligned box. True on overlap
+// (touching counts). Candidate axes: the 3 AABB face normals (world X/Y/Z), the
+// 3 OBB face normals, and the 9 edge cross-products. A near-zero cross-product
+// (parallel edges) is skipped — its separation is already covered by a face axis.
+[[nodiscard]] inline bool overlapsObbAabb(const Obb& obb, const AABB& aabb) {
+  const Vec3 ac{(aabb.min.x + aabb.max.x) * 0.5, (aabb.min.y + aabb.max.y) * 0.5,
+                (aabb.min.z + aabb.max.z) * 0.5};
+  const Vec3 ah{(aabb.max.x - aabb.min.x) * 0.5, (aabb.max.y - aabb.min.y) * 0.5,
+                (aabb.max.z - aabb.min.z) * 0.5};
+  const Vec3 d = obb.center - ac;  // center-to-center
+  const std::array<Vec3, 3> ax{{rotate(obb.rotation, {1, 0, 0}), rotate(obb.rotation, {0, 1, 0}),
+                                rotate(obb.rotation, {0, 0, 1})}};
+  const std::array<Vec3, 3> wb{{{1, 0, 0}, {0, 1, 0}, {0, 0, 1}}};  // AABB axes
+  const std::array<double, 3> he{{obb.halfExtents.x, obb.halfExtents.y, obb.halfExtents.z}};
+
+  // Projected radius of the AABB onto axis L.
+  const auto radiusAabb = [&](const Vec3& L) {
+    return std::abs(L.x) * ah.x + std::abs(L.y) * ah.y + std::abs(L.z) * ah.z;
+  };
+  // Projected radius of the OBB onto axis L.
+  const auto radiusObb = [&](const Vec3& L) {
+    return std::abs(dot(L, ax[0])) * he[0] + std::abs(dot(L, ax[1])) * he[1] +
+           std::abs(dot(L, ax[2])) * he[2];
+  };
+  const auto separated = [&](const Vec3& L) {
+    if (dot(L, L) < 1e-12) return false;  // degenerate axis: not separating
+    return std::abs(dot(d, L)) > radiusAabb(L) + radiusObb(L);
+  };
+
+  for (const Vec3& L : wb)
+    if (separated(L)) return false;
+  for (const Vec3& L : ax)
+    if (separated(L)) return false;
+  for (const Vec3& A : wb)
+    for (const Vec3& B : ax)
+      if (separated(cross(A, B))) return false;
+  return true;
+}
+
 }  // namespace x4sb

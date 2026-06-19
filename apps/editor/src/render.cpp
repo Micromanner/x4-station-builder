@@ -9,6 +9,7 @@
 #include "x4sb/data/types.hpp"
 #include "x4sb/editorcore/display_flip.hpp"
 #include "x4sb/editorcore/gizmo.hpp"
+#include "x4sb/snap/snap.hpp"
 
 #include <algorithm>
 #include <array>
@@ -64,6 +65,57 @@ void drawModuleBox(const ModuleDef& def, const Transform& xf, ::Color fill, ::Co
   rlMultMatrixf(MatrixToFloatV(toRlMatrix(xf)).v);
   DrawCubeV(toRl(center), toRl(size), fill);
   DrawCubeWiresV(toRl(center), toRl(size), edge);
+  rlPopMatrix();
+}
+
+// Clip segment [a,b] to the +/-L plot cube (parametric slab clip), writing the
+// clipped endpoints back. Returns false if the segment lies entirely outside.
+[[nodiscard]] bool clipSegmentToPlot(Vec3& a, Vec3& b, double L) {
+  const Vec3 d = b - a;
+  const double o[3] = {a.x, a.y, a.z};
+  const double dd[3] = {d.x, d.y, d.z};
+  double t0 = 0.0;
+  double t1 = 1.0;
+  for (int i = 0; i < 3; ++i) {
+    if (std::abs(dd[i]) < 1e-9) {
+      if (o[i] < -L || o[i] > L) return false;  // parallel to slab and outside it
+      continue;
+    }
+    double tn = (-L - o[i]) / dd[i];
+    double tf = (L - o[i]) / dd[i];
+    if (tn > tf) std::swap(tn, tf);
+    t0 = std::max(t0, tn);
+    t1 = std::min(t1, tf);
+    if (t0 > t1) return false;
+  }
+  const Vec3 na = a + d * t0;
+  const Vec3 nb = a + d * t1;
+  a = na;
+  b = nb;
+  return true;
+}
+
+// Draw a clearance OBB (local-space ClearanceVolume placed by a module transform)
+// as a translucent box + wireframe. Render-only; `color` carries its own alpha.
+// The true keep-clear box runs up to 100 km out (the capital-ship flight path out of
+// the plot) — drawing that literally swamps the scene and overruns the far plane.
+// Modules can't exist outside the +/-10km plot, so the DRAWN box is clipped to the
+// plot along its corridor axis (collision still uses the full untruncated volume).
+void drawClearanceVolume(const ClearanceVolume& cv, const Transform& moduleXf, ::Color color) {
+  const Quat worldRot = moduleXf.rotation * cv.rotation;
+  const Vec3 worldCenter = apply(moduleXf, cv.center);
+  const Vec3 axis = rotate(worldRot, Vec3{0, 0, 1});  // corridor (long) axis in world
+  Vec3 nearEnd = worldCenter - axis * cv.halfExtents.z;
+  Vec3 farEnd = worldCenter + axis * cv.halfExtents.z;
+  constexpr double kPlotLimit = 10000.0;
+  if (!clipSegmentToPlot(nearEnd, farEnd, kPlotLimit)) return;
+
+  const Transform world{(nearEnd + farEnd) * 0.5, worldRot};
+  const Vec3 size{cv.halfExtents.x * 2.0, cv.halfExtents.y * 2.0, length(farEnd - nearEnd)};
+  rlPushMatrix();
+  rlMultMatrixf(MatrixToFloatV(toRlMatrix(world)).v);
+  DrawCubeV(toRl(Vec3{0, 0, 0}), toRl(size), ::Color{color.r, color.g, color.b, 40});
+  DrawCubeWiresV(toRl(Vec3{0, 0, 0}), toRl(size), color);
   rlPopMatrix();
 }
 
@@ -655,6 +707,57 @@ void drawScene(const EditorState& state, const ::Camera3D& camera, MeshCache& me
     }
   }
 
+  // ── Flight-corridor clearance volumes ───────────────────────────────────────
+  // Which existing dock corridor an in-progress placement/drag is intruding, so it
+  // turns red exactly when a body enters it (even with "show all" off). Only computed
+  // while a ghost or drag is active, so it stays O(docks) and off the idle path.
+  std::vector<ClearanceHit> revealed;
+  if (state.ghost()) {
+    if (const ModuleDef* gdef = state.defFor(state.ghost()->defId))
+      revealed = violatedClearance(*gdef, state.ghost()->worldTransform, 0, 0, state.station(),
+                                   state.catalog());
+  } else if (state.selected() && state.dragPreview()) {
+    if (const PlacedModule* m = state.station().find(*state.selected()))
+      if (const ModuleDef* sdef = state.defFor(m->defId))
+        revealed = violatedClearance(*sdef, *state.dragPreview(), *state.selected(), 0,
+                                     state.station(), state.catalog());
+  }
+  const auto isRevealed = [&revealed](InstanceId id, std::size_t i) {
+    for (const ClearanceHit& h : revealed)
+      if (h.blocker == id && h.volumeIndex == i) return true;
+    return false;
+  };
+
+  {
+    ZoneScopedN("iact: clearance");
+    const ::Color kRed{230, 90, 90, 255};
+    const ::Color kGreen{120, 230, 140, 255};
+    const ::Color kInfo{90, 180, 220, 200};  // neutral "show all" corridor
+    const std::optional<InstanceId> sel = state.selected();
+    const bool showAll = state.showAllClearance();
+    for (const PlacedModule& m : state.station().modules()) {
+      const ModuleDef* mdef = state.defFor(m.defId);
+      if (mdef == nullptr || mdef->clearanceVolumes.empty()) continue;
+      const bool isSelected = sel.has_value() && *sel == m.instanceId;
+      const bool selBlocked =
+          isSelected && collidesClearance(*mdef, m.worldTransform, m.instanceId, 0, state.station(),
+                                          state.catalog());
+      for (std::size_t i = 0; i < mdef->clearanceVolumes.size(); ++i) {
+        ::Color col{};
+        if (isRevealed(m.instanceId, i)) {
+          col = kRed;
+        } else if (isSelected) {
+          col = selBlocked ? kRed : kGreen;
+        } else if (showAll) {
+          col = kInfo;
+        } else {
+          continue;  // not selected, not intruded, show-all off -> hidden
+        }
+        drawClearanceVolume(mdef->clearanceVolumes[i], m.worldTransform, col);
+      }
+    }
+  }
+
   if (state.ghost()) {
     const ModuleDef* gdef = state.defFor(state.ghost()->defId);
     if (gdef != nullptr) {
@@ -666,6 +769,12 @@ void drawScene(const EditorState& state, const ::Camera3D& camera, MeshCache& me
           showMeshes && drawModuleMeshes(*gdef, state.ghost()->worldTransform, meshes, edge);
       rlDisableBackfaceCulling();
       if (!drew) drawModuleBox(*gdef, state.ghost()->worldTransform, fill, edge);
+      if (!gdef->clearanceVolumes.empty()) {
+        const ::Color col = state.ghost()->valid ? ::Color{120, 230, 140, 255}
+                                                 : ::Color{230, 90, 90, 255};
+        for (const ClearanceVolume& cv : gdef->clearanceVolumes)
+          drawClearanceVolume(cv, state.ghost()->worldTransform, col);
+      }
     }
   }
 
@@ -805,16 +914,18 @@ void drawHud(const EditorState& state, int screenWidth, int /*screenHeight*/, bo
                 def != nullptr ? state.activeIndex() + 1 : 0, state.activeCount());
   DrawText(line, 12, 34, 18, SKYBLUE);
 
-  std::snprintf(line, sizeof(line), "Placed: %zu    Undo:%s  Redo:%s    Gizmos:%s",
-                state.station().size(), state.canUndo() ? "on" : "-", state.canRedo() ? "on" : "-",
-                showGizmos ? "on" : "off");
+  std::snprintf(line, sizeof(line),
+                "Placed: %zu    Undo:%s  Redo:%s    Gizmos:%s    Overlap:%s    Corridors:%s",
+                state.station().size(), state.canUndo() ? "on" : "-",
+                state.canRedo() ? "on" : "-", showGizmos ? "on" : "off",
+                state.allowOverlap() ? "ON" : "off", state.showAllClearance() ? "ON" : "off");
   DrawText(line, 12, 56, 16, LIGHTGRAY);
 
   DrawText(
       "[ / ]=cycle  1=Prod 2=Stor 3=Hab 4=Dock 5=Def 6=Conn 7=Other  0=all  G=gizmos  M=mesh/box",
       12, 78, 14, GRAY);
   DrawText(
-      "LMB=place/select/drag-gizmo   Q=build/select   T/Y=move/rotate gizmo   R/Shift+R/Ctrl+R=rotate   Alt=free   Del/X=delete   Ctrl+Z/Y=undo/redo   RMB=orbit   wheel=zoom   F=frame",
+      "LMB=place/select/drag-gizmo   Q=build/select   T/Y=move/rotate gizmo   R/Shift+R/Ctrl+R=rotate   O=overlap   C=corridors   Alt=free   Del/X=delete   Ctrl+Z/Y=undo/redo   RMB=orbit   wheel=zoom   F=frame",
       12, 96, 14, GRAY);
 
   DrawFPS(screenWidth - 90, 10);

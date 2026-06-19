@@ -121,7 +121,13 @@ void EditorState::updateGhost(Vec3 rayOriginX4, Vec3 rayDirX4, bool forceFree) {
             const Transform xf = computeSnapTransform(station_, catalog_, cand->instanceId,
                                                       cand->targetPointId, *def, cand->newPointId);
             const AABB snapWorldBox = worldAabb(def->aabb, xf);
-            ghost_ = Ghost{def->id, xf, isInsidePlot(snapWorldBox), cand};
+            // Clearance is always enforced regardless of allowOverlap_ — confirmed
+            // in-game: the "Allow Module Overlap" toggle only relaxes body AABBs,
+            // not dock/cradle flight corridors.
+            const bool clear =
+                (allowOverlap_ || !collidesWithStation(*def, xf, cand->instanceId, station_, catalog_)) &&
+                !collidesClearance(*def, xf, cand->instanceId, 0, station_, catalog_);
+            ghost_ = Ghost{def->id, xf, isInsidePlot(snapWorldBox) && clear, cand};
             return;
           }
         }
@@ -139,7 +145,11 @@ void EditorState::updateGhost(Vec3 rayOriginX4, Vec3 rayDirX4, bool forceFree) {
   xf.rotation = pendingRotation_;
   xf = clampToPlot(def->aabb, xf);
   const AABB worldBox = worldAabb(def->aabb, xf);
-  ghost_ = Ghost{def->id, xf, isInsidePlot(worldBox), std::nullopt};
+  // Same clearance-always rule as the snap path (see comment above).
+  const bool clear =
+      (allowOverlap_ || !collidesWithStation(*def, xf, 0, station_, catalog_)) &&
+      !collidesClearance(*def, xf, 0, 0, station_, catalog_);
+  ghost_ = Ghost{def->id, xf, isInsidePlot(worldBox) && clear, std::nullopt};
 }
 
 void EditorState::rotateGhost(Vec3 worldAxis) {
@@ -265,6 +275,15 @@ bool EditorState::endGizmoDrag() {
   const ModuleDef* def = pm ? catalog_.find(pm->defId) : nullptr;
   if (def) {
     if (!isInsidePlot(worldAabb(def->aabb, d.preview))) {
+      return false;
+    }
+    const InstanceId partner = d.snap ? d.snap->instanceId : 0;
+    // Body overlap is togglable; clearance (dock/cradle corridor) always blocks.
+    const bool bodyBlocked =
+        !allowOverlap_ && collidesWithStation(*def, d.preview, d.id, partner, station_, catalog_);
+    const bool clearanceBlocked =
+        collidesClearance(*def, d.preview, d.id, partner, station_, catalog_);
+    if (bodyBlocked || clearanceBlocked) {
       return false;
     }
   }

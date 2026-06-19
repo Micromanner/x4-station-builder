@@ -5,10 +5,12 @@
 #include "x4sb/document/station.hpp"
 #include "x4sb/snap/connector_grid.hpp"
 
+#include <cstddef>
 #include <cstdint>
 #include <memory>
 #include <optional>
 #include <string>
+#include <vector>
 
 namespace x4sb {
 
@@ -57,6 +59,40 @@ std::optional<SnapCandidate> findSnapCandidate(const ModuleDef& newDef, Vec3 cur
 bool collidesWithStation(const ModuleDef& def, const Transform& worldTransform,
                          InstanceId ignoreInstanceId, const Station& station,
                          const ModuleCatalog& catalog);
+
+// As above, but skips up to two instances — the moved module and its snap partner
+// during a drag-commit. Either id may be 0 (no instance has id 0).
+[[nodiscard]] bool collidesWithStation(const ModuleDef& def, const Transform& worldTransform,
+                                       InstanceId ignoreA, InstanceId ignoreB,
+                                       const Station& station, const ModuleCatalog& catalog);
+
+// Clearance-volume overlap test (known-issues §3.1): true if the candidate's
+// dock/cradle clearance volumes intersect any other placed module's body AABB,
+// OR if any other module's clearance volume intersects the candidate's body AABB.
+// `ignoreA`/`ignoreB` are skipped (the dragged module and its snap partner); either
+// may be 0.
+[[nodiscard]] bool collidesClearance(const ModuleDef& def, const Transform& worldTransform,
+                                     InstanceId ignoreA, InstanceId ignoreB, const Station& station,
+                                     const ModuleCatalog& catalog);
+
+// One placed dock's corridor that a candidate body intrudes: the dock's instance id
+// and the index of the offending volume in that dock's `clearanceVolumes`. Lets the
+// editor reveal exactly which corridor a placement/drag is blocking.
+struct ClearanceHit {
+  InstanceId blocker{0};
+  std::size_t volumeIndex{0};
+};
+
+// The "their corridor vs my body" half of collidesClearance, but enumerated: every
+// existing dock corridor that a body (`def` at `worldTransform`) intrudes. Empty if
+// none. `ignoreA`/`ignoreB` are skipped (the moved module + its snap partner); either
+// may be 0. (A candidate's OWN corridors are drawn separately by the editor, so they
+// are not reported here.)
+[[nodiscard]] std::vector<ClearanceHit> violatedClearance(const ModuleDef& def,
+                                                          const Transform& worldTransform,
+                                                          InstanceId ignoreA, InstanceId ignoreB,
+                                                          const Station& station,
+                                                          const ModuleCatalog& catalog);
 
 // Compose find -> solve -> collision-check into a ready-to-execute placement
 // command, or nullptr if there is no free compatible target in `radius` or the

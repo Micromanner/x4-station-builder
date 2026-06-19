@@ -77,6 +77,19 @@ class EditorState {
   }
   [[nodiscard]] bool placementEnabled() const { return placementEnabled_; }
 
+  // X4's editor blocks overlapping module bodies; this toggle (default off)
+  // bypasses the body-overlap (AABB) check only — dock flight-corridor clearance
+  // stays enforced (verified in-game: overlap-on still blocks corridor placement).
+  // Export is unaffected — X4 accepts overlapping imports unconditionally
+  // (known-issues §1.1 / §2.1).
+  void setAllowOverlap(bool allow) { allowOverlap_ = allow; }
+  [[nodiscard]] bool allowOverlap() const { return allowOverlap_; }
+
+  // Render-only: when true the editor draws EVERY dock's flight-corridor clearance
+  // volume, not just the selected/ghost module's. Has no effect on placement validity.
+  void setShowAllClearance(bool show) { showAllClearance_ = show; }
+  [[nodiscard]] bool showAllClearance() const { return showAllClearance_; }
+
   // ── History ─────────────────────────────────────────────────────────────
   void undo() {
     undo_.undo(station_);
@@ -164,6 +177,8 @@ class EditorState {
   std::optional<Ghost> ghost_;
   Quat pendingRotation_{};   // orients the free-place ghost; reset on commit
   bool placementEnabled_{true};  // false = select mode (no ghost; clicks select)
+  bool allowOverlap_{false};  // false = block overlap (mirrors X4's editor default)
+  bool showAllClearance_{false};  // render-only: draw every dock's corridor when true
 
   mutable std::optional<ConnectorGrid> connectorGrid_;  // built lazily by connectorGrid()
   mutable bool gridDirty_{true};                        // true => rebuild on next access

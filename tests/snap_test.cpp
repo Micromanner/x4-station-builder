@@ -461,3 +461,105 @@ TEST_CASE("grid-backed findSnapCandidate honors ignoreInstanceId") {
       findSnapCandidate(newDef, Vec3{500, 0, 0}, station, catalog, grid, 1000.0, id).has_value());
 }
 
+TEST_CASE("collidesClearance flags a module blocking a dock corridor") {
+  ModuleCatalog catalog;
+
+  // A dock module: small body, with a clearance corridor extending +Z to ~z=600.
+  ModuleDef dock;
+  dock.id = "DOCK";
+  dock.aabb = AABB{{-5, -5, -5}, {5, 5, 5}};
+  ClearanceVolume cv;
+  cv.rotation = Quat{};                 // outward = +Z
+  cv.halfExtents = {50, 50, 300};
+  cv.center = {0, 0, 300};              // spans z[0,600]
+  cv.shipSize = "dock_l";
+  dock.clearanceVolumes.push_back(cv);
+  catalog.add(dock);
+
+  // A plain blocker module.
+  ModuleDef blocker;
+  blocker.id = "BLOCK";
+  blocker.aabb = AABB{{-10, -10, -10}, {10, 10, 10}};
+  catalog.add(blocker);
+
+  Station station;
+  PlacedModule d;  // dock at origin, identity
+  d.defId = "DOCK";
+  station.add(d);
+
+  // Place a blocker inside the corridor (z=300) -> clearance collision.
+  Transform inCorridor;
+  inCorridor.position = {0, 0, 300};
+  CHECK(collidesClearance(blocker, inCorridor, 0, 0, station, catalog));
+
+  // Place it off to the side, clear of the corridor.
+  Transform aside;
+  aside.position = {500, 0, 300};
+  CHECK_FALSE(collidesClearance(blocker, aside, 0, 0, station, catalog));
+}
+
+TEST_CASE("violatedClearance names the dock corridors a body intrudes") {
+  ModuleCatalog catalog;
+
+  // A dock with one corridor spanning z[0,600].
+  ModuleDef dock;
+  dock.id = "DOCK";
+  dock.aabb = AABB{{-5, -5, -5}, {5, 5, 5}};
+  ClearanceVolume cv;
+  cv.rotation = Quat{};  // outward = +Z
+  cv.halfExtents = {50, 50, 300};
+  cv.center = {0, 0, 300};
+  cv.shipSize = "dock_l";
+  dock.clearanceVolumes.push_back(cv);
+  catalog.add(dock);
+
+  ModuleDef blocker;
+  blocker.id = "BLOCK";
+  blocker.aabb = AABB{{-10, -10, -10}, {10, 10, 10}};
+  catalog.add(blocker);
+
+  Station station;
+  PlacedModule d;
+  d.defId = "DOCK";
+  const InstanceId dockId = station.add(d);
+
+  // A body inside the corridor (z=300) -> one hit naming the dock's volume 0.
+  Transform inCorridor;
+  inCorridor.position = {0, 0, 300};
+  const std::vector<ClearanceHit> hits =
+      violatedClearance(blocker, inCorridor, 0, 0, station, catalog);
+  REQUIRE(hits.size() == 1);
+  CHECK(hits[0].blocker == dockId);
+  CHECK(hits[0].volumeIndex == 0);
+
+  // Off to the side -> no hits.
+  Transform aside;
+  aside.position = {500, 0, 300};
+  CHECK(violatedClearance(blocker, aside, 0, 0, station, catalog).empty());
+
+  // The dock never reports blocking its own corridor (ignored id).
+  CHECK(violatedClearance(dock, Transform{}, dockId, 0, station, catalog).empty());
+}
+
+TEST_CASE("collidesWithStation two-id overload skips both instances") {
+  ModuleCatalog catalog;
+  ModuleDef box;
+  box.id = "B";
+  box.aabb = AABB{{-1, -1, -1}, {1, 1, 1}};
+  catalog.add(box);
+
+  Station station;
+  PlacedModule p0;  // id 1, at origin
+  p0.defId = "B";
+  const InstanceId id0 = station.add(p0);
+  PlacedModule p1;  // id 2, touching at x=2
+  p1.defId = "B";
+  p1.worldTransform.position = {2, 0, 0};
+  const InstanceId id1 = station.add(p1);
+
+  Transform at0;  // overlaps both id0 (origin) and the touching id1
+  CHECK(collidesWithStation(box, at0, 0, 0, station, catalog));        // nothing ignored
+  CHECK(collidesWithStation(box, at0, id0, 0, station, catalog));      // still hits id1 (touch)
+  CHECK_FALSE(collidesWithStation(box, at0, id0, id1, station, catalog));  // both ignored
+}
+

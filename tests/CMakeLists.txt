@@ -13,6 +13,7 @@ add_executable(x4sb_tests
   gizmo_screen_size_test.cpp
   archive_test.cpp
   assetpipe_test.cpp
+  clearance_test.cpp
   xmf_test.cpp
   plan_test.cpp
   catalog_test.cpp

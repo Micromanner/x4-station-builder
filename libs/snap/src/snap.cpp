@@ -13,6 +13,11 @@ const ConnectionPoint* findPoint(const ModuleDef& def, const std::string& id) {
   return nullptr;
 }
 
+// A local clearance volume placed into the world by a module's transform.
+Obb worldObb(const ClearanceVolume& v, const Transform& xf) {
+  return Obb{apply(xf, v.center), xf.rotation * v.rotation, v.halfExtents};
+}
+
 // Connector mate convention (spec §3.1 — CONFIRMED against real install assets via the
 // editor's --snaptest harness: two struct_arg_cross_01 hubs mate into a clean,
 // non-overlapping joint with coincident connectors and opposing normals, meshes aligned
@@ -168,18 +173,58 @@ std::optional<SnapCandidate> findSnapCandidate(const ModuleDef& newDef, Vec3 que
   return best;
 }
 
+bool collidesWithStation(const ModuleDef& def, const Transform& worldTransform, InstanceId ignoreA,
+                         InstanceId ignoreB, const Station& station, const ModuleCatalog& catalog) {
+  const AABB a = worldAabb(def.aabb, worldTransform);
+  for (const auto& placed : station.modules()) {
+    if (placed.instanceId == ignoreA || placed.instanceId == ignoreB) continue;
+    const ModuleDef* other = catalog.find(placed.defId);
+    if (!other) continue;
+    if (overlaps(a, worldAabb(other->aabb, placed.worldTransform))) return true;
+  }
+  return false;
+}
+
 bool collidesWithStation(const ModuleDef& def, const Transform& worldTransform,
                          InstanceId ignoreInstanceId, const Station& station,
                          const ModuleCatalog& catalog) {
-  const AABB a = worldAabb(def.aabb, worldTransform);
+  return collidesWithStation(def, worldTransform, ignoreInstanceId, 0, station, catalog);
+}
+
+bool collidesClearance(const ModuleDef& def, const Transform& worldTransform, InstanceId ignoreA,
+                       InstanceId ignoreB, const Station& station, const ModuleCatalog& catalog) {
+  const AABB myBody = worldAabb(def.aabb, worldTransform);
   for (const auto& placed : station.modules()) {
-    if (placed.instanceId == ignoreInstanceId) continue;
+    if (placed.instanceId == ignoreA || placed.instanceId == ignoreB) continue;
     const ModuleDef* other = catalog.find(placed.defId);
     if (!other) continue;
-    const AABB b = worldAabb(other->aabb, placed.worldTransform);
-    if (overlaps(a, b)) return true;
+
+    // My corridors vs their body.
+    const AABB otherBody = worldAabb(other->aabb, placed.worldTransform);
+    for (const ClearanceVolume& cv : def.clearanceVolumes)
+      if (overlapsObbAabb(worldObb(cv, worldTransform), otherBody)) return true;
+
+    // Their corridors vs my body.
+    for (const ClearanceVolume& cv : other->clearanceVolumes)
+      if (overlapsObbAabb(worldObb(cv, placed.worldTransform), myBody)) return true;
   }
   return false;
+}
+
+std::vector<ClearanceHit> violatedClearance(const ModuleDef& def, const Transform& worldTransform,
+                                            InstanceId ignoreA, InstanceId ignoreB,
+                                            const Station& station, const ModuleCatalog& catalog) {
+  std::vector<ClearanceHit> hits;
+  const AABB myBody = worldAabb(def.aabb, worldTransform);
+  for (const auto& placed : station.modules()) {
+    if (placed.instanceId == ignoreA || placed.instanceId == ignoreB) continue;
+    const ModuleDef* other = catalog.find(placed.defId);
+    if (!other) continue;
+    for (std::size_t i = 0; i < other->clearanceVolumes.size(); ++i)
+      if (overlapsObbAabb(worldObb(other->clearanceVolumes[i], placed.worldTransform), myBody))
+        hits.push_back({placed.instanceId, i});
+  }
+  return hits;
 }
 
 std::unique_ptr<Command> makeSnapPlacement(const ModuleDef& newDef, Vec3 cursorWorldPos,
