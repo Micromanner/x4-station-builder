@@ -42,7 +42,11 @@ Transform clampToPlot(const AABB& localAabb, Transform t) {
 
 EditorState::EditorState(const ModuleCatalog& catalog) : catalog_(catalog) {
   order_.reserve(catalog.all().size());
-  for (const auto& entry : catalog.all()) order_.push_back(entry.first);
+  // Only player-buildable modules are placeable (known-issues 2.2): NPC landmark /
+  // trade-station pieces are flagged !playerBuildable and must not appear in the
+  // palette. They stay in catalog_ so imported plans referencing them still render.
+  for (const auto& entry : catalog.all())
+    if (entry.second.playerBuildable) order_.push_back(entry.first);
   std::sort(order_.begin(), order_.end());
 }
 

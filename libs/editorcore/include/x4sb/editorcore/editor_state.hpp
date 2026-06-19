@@ -176,7 +176,7 @@ class EditorState {
   const ModuleCatalog& catalog_;
   Station station_;
   UndoStack undo_;
-  std::vector<std::string> order_;  // all module ids, sorted (stable cursor)
+  std::vector<std::string> order_;  // player-buildable module ids, sorted (stable cursor)
   std::optional<Category> filter_;
   std::size_t activeIndex_{0};
   std::optional<InstanceId> selected_;

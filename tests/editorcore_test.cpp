@@ -59,6 +59,30 @@ TEST_CASE("active module: stable order, cycle wraps, filter narrows") {
   CHECK(s.activeCount() == 2);
 }
 
+TEST_CASE("palette hides non-buildable modules but the catalog still retains them") {
+  // landmarks / NPC trade-station pieces are flagged !playerBuildable in the catalog
+  // (known-issues 2.2). They must not appear in the placeable cycle, yet must stay in
+  // the catalog so an imported plan referencing them still resolves a def to render.
+  ModuleCatalog c;
+  c.add(makeModule("a_mod", Category::Production, "a1", {0.5, 0, 0}));
+  ModuleDef nb = makeModule("landmark_mod", Category::Other, "n1", {0, 0, 0});
+  nb.playerBuildable = false;
+  c.add(nb);
+
+  EditorState s(c);
+
+  // Placeable view contains only the buildable module; cycling never lands on it.
+  REQUIRE(s.activeCount() == 1);
+  REQUIRE(s.activeDef() != nullptr);
+  CHECK(s.activeDef()->id == "a_mod");
+  s.cycleActive(1);  // wraps within the single buildable entry
+  CHECK(s.activeDef()->id == "a_mod");
+
+  // Catalog retention: the non-buildable def is still resolvable for rendering.
+  REQUIRE(s.defFor("landmark_mod") != nullptr);
+  CHECK_FALSE(s.defFor("landmark_mod")->playerBuildable);
+}
+
 TEST_CASE("root free-place: ghost on ground, commit adds module, undo/redo") {
   const ModuleCatalog c = twoModuleCatalog();
   EditorState s(c);  // active = a_mod
