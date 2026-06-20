@@ -9,6 +9,7 @@
 #include <cmath>
 #include <memory>
 #include <string>
+#include <utility>
 #include <vector>
 
 namespace x4sb {
@@ -414,17 +415,17 @@ int EditorState::cartTotal() const {
 
 std::string EditorState::cartSummary() const {
   if (cart_.empty()) return "cart: empty";
-  std::vector<std::string> ids;
-  ids.reserve(cart_.size());
-  for (const auto& [id, count] : cart_) ids.push_back(id);
-  std::sort(ids.begin(), ids.end());  // deterministic order (cart_ is unordered)
+  std::vector<std::pair<std::string, int>> entries(cart_.begin(), cart_.end());
+  std::sort(entries.begin(), entries.end());  // deterministic order (cart_ is unordered)
   std::string out = "cart:";
-  for (const auto& id : ids) {
+  int total = 0;
+  for (const auto& [id, count] : entries) {
     const ModuleDef* d = catalog_.find(id);
     const std::string label = d != nullptr ? displayName(*d) : id;
-    out += " " + label + " x" + std::to_string(cart_.at(id));
+    out += " " + label + " x" + std::to_string(count);
+    total += count;
   }
-  out += " (" + std::to_string(ids.size()) + " types, " + std::to_string(cartTotal()) + ")";
+  out += " (" + std::to_string(entries.size()) + " types, " + std::to_string(total) + ")";
   return out;
 }
 
@@ -434,9 +435,8 @@ AutoLayoutReport EditorState::runAutoLayout() {
   cmds.reserve(r.placements.size());
   for (const LayoutPlacement& p : r.placements) {
     if (p.snapped)
-      cmds.push_back(std::make_unique<PlaceModuleCommand>(p.defId, p.worldTransform,
-                                                          p.targetInstanceId, p.newPointId,
-                                                          p.targetPointId));
+      cmds.push_back(std::make_unique<PlaceModuleCommand>(
+          p.defId, p.worldTransform, p.targetInstanceId, p.newPointId, p.targetPointId));
     else
       cmds.push_back(std::make_unique<PlaceModuleCommand>(p.defId, p.worldTransform));
   }

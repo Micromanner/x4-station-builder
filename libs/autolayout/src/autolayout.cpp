@@ -13,13 +13,20 @@ namespace {
 
 int categoryPriority(Category c) {
   switch (c) {
-    case Category::Connector: return 0;
-    case Category::Production: return 1;
-    case Category::Storage: return 2;
-    case Category::Habitat: return 3;
-    case Category::Defense: return 4;
-    case Category::Other: return 5;
-    case Category::Dock: return 6;
+    case Category::Connector:
+      return 0;
+    case Category::Production:
+      return 1;
+    case Category::Storage:
+      return 2;
+    case Category::Habitat:
+      return 3;
+    case Category::Defense:
+      return 4;
+    case Category::Other:
+      return 5;
+    case Category::Dock:
+      return 6;
   }
   return 5;
 }
@@ -60,6 +67,11 @@ const ConnectionPoint* pointById(const ModuleDef& def, const std::string& id) {
   return nullptr;
 }
 
+void sortUnique(std::vector<std::string>& v) {
+  std::sort(v.begin(), v.end());
+  v.erase(std::unique(v.begin(), v.end()), v.end());
+}
+
 void addFloating(Station& work, const ModuleDef& def, const Transform& xf, AutoLayoutResult& r) {
   PlacedModule m;
   m.defId = def.id;
@@ -84,7 +96,7 @@ void addSnapped(Station& work, const ModuleDef& def, const Transform& xf, Instan
 struct Candidate {
   InstanceId targetId = 0;
   std::string targetPt;
-  double dist = 0.0;    // connector distance from the station centroid
+  double dist = 0.0;  // connector distance from the station centroid
   bool sameCat = false;
 };
 
@@ -152,7 +164,8 @@ std::optional<Transform> nextFloatSlot(Station& work, const ModuleCatalog& catal
   const double stepZ = std::abs(span.z) + opts.floatingMargin;
   const double stepX = std::abs(span.x) + opts.floatingMargin;
   const double h = opts.plotHalfExtent;
-  const Vec3 center{(def.aabb.min.x + def.aabb.max.x) * 0.5, (def.aabb.min.y + def.aabb.max.y) * 0.5,
+  const Vec3 center{(def.aabb.min.x + def.aabb.max.x) * 0.5,
+                    (def.aabb.min.y + def.aabb.max.y) * 0.5,
                     (def.aabb.min.z + def.aabb.max.z) * 0.5};
   while (cx <= h) {
     Transform xf;
@@ -193,12 +206,11 @@ OrderedCart orderedPlacement(const QuantityList& cart, const ModuleCatalog& cata
               if (pa != pb) return pa < pb;
               const double va = aabbVolume(da->aabb);
               const double vb = aabbVolume(db->aabb);
-              if (va > vb) return true;   // larger first (no float == comparison)
+              if (va > vb) return true;  // larger first (no float == comparison)
               if (va < vb) return false;
               return a < b;
             });
-  std::sort(out.skipped.begin(), out.skipped.end());
-  out.skipped.erase(std::unique(out.skipped.begin(), out.skipped.end()), out.skipped.end());
+  sortUnique(out.skipped);
   return out;
 }
 
@@ -236,10 +248,7 @@ AutoLayoutResult autoLayout(const Station& existing, const QuantityList& cart,
   }
   // One entry per distinct id: the saturation path appends a def once per overflow
   // instance, so dedupe to match the unknown/non-buildable prefix's shape.
-  std::sort(result.report.skippedDefs.begin(), result.report.skippedDefs.end());
-  result.report.skippedDefs.erase(
-      std::unique(result.report.skippedDefs.begin(), result.report.skippedDefs.end()),
-      result.report.skippedDefs.end());
+  sortUnique(result.report.skippedDefs);
   return result;
 }
 
