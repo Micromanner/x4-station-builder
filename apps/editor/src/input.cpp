@@ -2,11 +2,9 @@
 
 #include "modifier_keys.hpp"
 #include "raylib_convert.hpp"  // toRl
-
+#include "raymath.h"           // Vector3Distance
 #include "x4sb/editorcore/display_flip.hpp"
 #include "x4sb/snap/pick.hpp"
-
-#include "raymath.h"  // Vector3Distance
 
 #include <array>
 #include <cstddef>
@@ -31,7 +29,8 @@ std::optional<Vec3> zoomFocusUnderCursor(const EditorState& state, const ::Camer
   const PlacedModule* pm = state.station().find(*hit);
   const ModuleDef* def = pm != nullptr ? state.catalog().find(pm->defId) : nullptr;
   if (def == nullptr) return std::nullopt;
-  const std::optional<double> t = rayIntersectsAabb(ro, rd, worldAabb(def->aabb, pm->worldTransform));
+  const std::optional<double> t =
+      rayIntersectsAabb(ro, rd, worldAabb(def->aabb, pm->worldTransform));
   if (!t) return std::nullopt;
   return flipZ(ro + rd * *t);  // X4 hit point -> display space (the camera's space)
 }
@@ -142,8 +141,8 @@ void handleMouse(EditorState& state, const ::Camera3D& camera) {
   if (IsMouseButtonPressed(MOUSE_BUTTON_LEFT)) {
     // A gizmo grab takes priority over commit/select.
     if (!state.beginGizmoDrag(ro, rd, scale)) {
-      const bool placed = state.ghost().has_value() && state.ghost()->valid &&
-                          state.commitGhost().has_value();
+      const bool placed =
+          state.ghost().has_value() && state.ghost()->valid && state.commitGhost().has_value();
       if (!placed) state.selectByRay(ro, rd);
     }
   }

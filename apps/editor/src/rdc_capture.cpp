@@ -2,15 +2,13 @@
 
 #include "app_paths.hpp"
 #include "mesh_cache.hpp"
+#include "raylib.h"
 #include "rdc_api.hpp"
 #include "render.hpp"
-
 #include "x4sb/data/catalog.hpp"
 #include "x4sb/data/math.hpp"
 #include "x4sb/editorcore/display_flip.hpp"
 #include "x4sb/planio/plan.hpp"
-
-#include "raylib.h"
 
 #include <cmath>
 #include <cstdio>
@@ -35,7 +33,8 @@ void drawFramed(const Station& station, const ModuleCatalog& catalog, MeshCache&
   const double dist = std::max(radius, 1.0) * 1.8;  // whole station in view
   constexpr double kYaw = 0.6;
   constexpr double kPitch = 0.45;
-  const Vec3 dir{std::cos(kPitch) * std::sin(kYaw), std::sin(kPitch), std::cos(kPitch) * std::cos(kYaw)};
+  const Vec3 dir{std::cos(kPitch) * std::sin(kYaw), std::sin(kPitch),
+                 std::cos(kPitch) * std::cos(kYaw)};
   const ::Camera3D camera{::Vector3{target.x + static_cast<float>(dir.x * dist),
                                     target.y + static_cast<float>(dir.y * dist),
                                     target.z + static_cast<float>(dir.z * dist)},
@@ -76,8 +75,9 @@ int runRdcCapture(const std::string& planPath) {
   std::printf("rdc: modules=%zu radius=%.0f  under_renderdoc=%s\n", station->modules().size(),
               bounds.radius, rdc::available() ? "yes" : "no");
   if (!rdc::available())
-    std::printf("rdc: not launched under RenderDoc — rendering only. Use tools/rdc-capture.ps1 to "
-                "produce a .rdc.\n");
+    std::printf(
+        "rdc: not launched under RenderDoc — rendering only. Use tools/rdc-capture.ps1 to "
+        "produce a .rdc.\n");
 
   InitWindow(kScreenW, kScreenH, "X4 Station Builder - rdc");
   {

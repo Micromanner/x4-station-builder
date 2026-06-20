@@ -3,11 +3,9 @@
 // coords inside a single global scale(1,1,-1) flip (parent §4); the 2D HUD is
 // drawn outside Mode3D.
 #include "mesh_cache.hpp"
-
+#include "raylib.h"
 #include "x4sb/data/math.hpp"
 #include "x4sb/editorcore/editor_state.hpp"
-
-#include "raylib.h"
 
 #include <string>
 

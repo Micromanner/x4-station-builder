@@ -31,8 +31,8 @@ std::optional<double> rayIntersectsAabb(Vec3 origin, Vec3 dir, const AABB& box) 
     tmax = std::min(tmax, t2);
     if (tmin > tmax) return std::nullopt;
   }
-  if (tmax < 0) return std::nullopt;     // box entirely behind the ray
-  return tmin >= 0 ? tmin : tmax;        // tmin < 0 -> origin inside box -> exit distance
+  if (tmax < 0) return std::nullopt;  // box entirely behind the ray
+  return tmin >= 0 ? tmin : tmax;     // tmin < 0 -> origin inside box -> exit distance
 }
 
 std::optional<InstanceId> pickModule(const Station& station, const ModuleCatalog& catalog,

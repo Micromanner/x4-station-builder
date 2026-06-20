@@ -63,10 +63,9 @@ std::optional<XmfMesh> parseXmf(const std::string& bytes) {
   std::size_t totalComp = 0;
   for (std::size_t i = 0; i < numChunks; ++i) {
     const std::size_t d = headerSize + i * descSize;
-    const Chunk c{readLE<std::uint32_t>(bytes, d + kTypeOff),
-                  readLE<std::uint32_t>(bytes, d + kCompOff),
-                  readLE<std::uint32_t>(bytes, d + kCountOff),
-                  readLE<std::uint32_t>(bytes, d + kStrideOff)};
+    const Chunk c{
+        readLE<std::uint32_t>(bytes, d + kTypeOff), readLE<std::uint32_t>(bytes, d + kCompOff),
+        readLE<std::uint32_t>(bytes, d + kCountOff), readLE<std::uint32_t>(bytes, d + kStrideOff)};
     totalComp += c.comp;
     chunks.push_back(c);
   }

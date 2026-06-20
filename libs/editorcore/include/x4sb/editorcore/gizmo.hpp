@@ -23,10 +23,10 @@ enum class GizmoMode { Translate, Rotate };
 struct GizmoModel {
   Vec3 origin{};
   double axisLength{1.0};
-  double planeSize{0.3};        // square plane-quad side, from the origin
-  double axisPickRadius{0.08};  // ray-to-axis distance threshold; also the ring band
-  double ringRadius{1.0};       // rotation-ring radius (circumscribes the arrows)
-  double centerPickRadius{0.15}; // sphere radius at the origin
+  double planeSize{0.3};          // square plane-quad side, from the origin
+  double axisPickRadius{0.08};    // ray-to-axis distance threshold; also the ring band
+  double ringRadius{1.0};         // rotation-ring radius (circumscribes the arrows)
+  double centerPickRadius{0.15};  // sphere radius at the origin
 };
 
 [[nodiscard]] GizmoModel gizmoModel(Vec3 origin, double scale);
@@ -43,8 +43,8 @@ struct GizmoModel {
 // Which in-mode handle (if any) the X4-space ray picks. Plane quads take priority
 // over axes. Handles not in `mode` are ignored entirely (so an out-of-mode handle
 // can never occlude an in-mode one). Spec §4.2.
-[[nodiscard]] std::optional<GizmoHandle> gizmoPick(const GizmoModel& g, Vec3 rayOrigin,
-                                                   Vec3 rayDir, GizmoMode mode);
+[[nodiscard]] std::optional<GizmoHandle> gizmoPick(const GizmoModel& g, Vec3 rayOrigin, Vec3 rayDir,
+                                                   GizmoMode mode);
 
 // True if `h` is shown/pickable in `mode`: Rotate => the rings; Translate => axes,
 // planes, and the center handle.

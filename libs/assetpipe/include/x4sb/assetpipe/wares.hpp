@@ -8,9 +8,9 @@
 namespace x4sb {
 
 struct WareModule {
-  std::string wareId;    // <ware id=...>
-  std::string nameRef;   // raw "{page,id}" from <ware name=...>
-  std::string macroRef;  // <component ref=...>, the module macro
+  std::string wareId;          // <ware id=...>
+  std::string nameRef;         // raw "{page,id}" from <ware name=...>
+  std::string macroRef;        // <component ref=...>, the module macro
   bool playerBuildable{true};  // false if tags include noplayerblueprint/noblueprint
 };
 

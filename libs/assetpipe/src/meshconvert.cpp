@@ -1,7 +1,6 @@
 #include "x4sb/assetpipe/meshconvert.hpp"
 
 #include "modulewalk.hpp"
-
 #include "x4sb/assetpipe/component.hpp"
 #include "x4sb/assetpipe/gltf.hpp"
 #include "x4sb/assetpipe/xmf.hpp"
@@ -125,7 +124,10 @@ MeshConvertResult convertModuleMeshes(const ExtractFn& extract,
           ++res.converted;
           if (deindex) ++res.deindexed;
           if (chosen > 0) ++res.reducedLod;
-          note("[ok]   " + rel + (deindex ? " (de-indexed)" : chosen > 0 ? " (lod" + std::to_string(chosen) + ")" : ""));
+          note("[ok]   " + rel +
+               (deindex      ? " (de-indexed)"
+                : chosen > 0 ? " (lod" + std::to_string(chosen) + ")"
+                             : ""));
         }
       },
       skipped);

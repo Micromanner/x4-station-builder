@@ -35,7 +35,10 @@ TEST_CASE("profileIdsIn returns digit-named subdirs, newest mtime first") {
   std::this_thread::sleep_for(std::chrono::milliseconds(1100));
   fs::create_directories(base / "222", ec);
   fs::create_directories(base / "notnumeric", ec);  // non-digit dir: excluded
-  { std::ofstream f(base / "999"); f << "x"; }       // digit-named FILE: excluded
+  {
+    std::ofstream f(base / "999");
+    f << "x";
+  }  // digit-named FILE: excluded
 
   const auto ids = platform::profileIdsIn(base);
   REQUIRE(ids.size() == 2);

@@ -1,8 +1,7 @@
 #include "mesh_load.hpp"
 
-#include "x4sb/editorcore/mesh_paths.hpp"
-
 #include "raylib.h"
+#include "x4sb/editorcore/mesh_paths.hpp"
 
 #include <string>
 #include <vector>

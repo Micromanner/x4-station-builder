@@ -100,16 +100,16 @@ TEST_CASE("gizmoDragRotation: signed angle swept about the ring axis") {
 }
 
 TEST_CASE("gizmoPick: a ray into the center sphere selects the Center handle") {
-  const GizmoModel g = gizmoModel(Vec3{0, 0, 0}, 1.0); // centerPickRadius 0.15
+  const GizmoModel g = gizmoModel(Vec3{0, 0, 0}, 1.0);  // centerPickRadius 0.15
   // A ray passing through the origin (0, 0, 0)
   const auto h = gizmoPick(g, Vec3{0, 0, 10}, Vec3{0, 0, -1}, GizmoMode::Translate);
   REQUIRE(h.has_value());
   CHECK(*h == GizmoHandle::Center);
 
-  // A ray close enough to the origin but missing planes (planes extend outward from origin, e.g. pu, pv in [0, 0.3])
-  // A ray at x=0.05, y=0.05, z=10 pointing straight down in -z: it lands at (0.05, 0.05, 0)
-  // Distance from origin is sqrt(0.05^2 + 0.05^2) = 0.0707 <= 0.15 (centerPickRadius)
-  // But is it within planes? The PlaneXY quad spans x[0, 0.3] and y[0, 0.3].
+  // A ray close enough to the origin but missing planes (planes extend outward from origin, e.g.
+  // pu, pv in [0, 0.3]) A ray at x=0.05, y=0.05, z=10 pointing straight down in -z: it lands at
+  // (0.05, 0.05, 0) Distance from origin is sqrt(0.05^2 + 0.05^2) = 0.0707 <= 0.15
+  // (centerPickRadius) But is it within planes? The PlaneXY quad spans x[0, 0.3] and y[0, 0.3].
   // Center sphere is in front of the XY plane (intersection at z = 0.15 * scale - ...).
   // So the sphere hit distance tCenter should be smaller than tPlane, selecting Center!
   const auto h2 = gizmoPick(g, Vec3{0.05, 0.05, 10}, Vec3{0, 0, -1}, GizmoMode::Translate);
@@ -133,7 +133,7 @@ TEST_CASE("gizmoDragDelta: Center handle drags along screen plane") {
 
 TEST_CASE("gizmoPick: Translate mode ignores rotation rings") {
   const GizmoModel g = gizmoModel(Vec3{0, 0, 0}, 1.0);  // ringRadius 1
-  const double s = 0.70710678;  // a point on the RotY ring, off every axis
+  const double s = 0.70710678;                          // a point on the RotY ring, off every axis
   CHECK(gizmoPick(g, Vec3{s, 1, s}, Vec3{0, -1, 0}, GizmoMode::Rotate) == GizmoHandle::RotY);
   CHECK_FALSE(gizmoPick(g, Vec3{s, 1, s}, Vec3{0, -1, 0}, GizmoMode::Translate).has_value());
 }
@@ -143,4 +143,3 @@ TEST_CASE("gizmoPick: Rotate mode ignores translate arrows") {
   CHECK(gizmoPick(g, Vec3{0.5, 1, 0}, Vec3{0, -1, 0}, GizmoMode::Translate) == GizmoHandle::AxisX);
   CHECK_FALSE(gizmoPick(g, Vec3{0.5, 1, 0}, Vec3{0, -1, 0}, GizmoMode::Rotate).has_value());
 }
-

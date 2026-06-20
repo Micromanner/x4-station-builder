@@ -35,13 +35,20 @@ Quat readQuat(const json& j) {
 
 std::string categoryToString(Category c) {
   switch (c) {
-    case Category::Production: return "production";
-    case Category::Storage: return "storage";
-    case Category::Habitat: return "habitat";
-    case Category::Dock: return "dock";
-    case Category::Defense: return "defense";
-    case Category::Connector: return "connector";
-    case Category::Other: break;
+    case Category::Production:
+      return "production";
+    case Category::Storage:
+      return "storage";
+    case Category::Habitat:
+      return "habitat";
+    case Category::Dock:
+      return "dock";
+    case Category::Defense:
+      return "defense";
+    case Category::Connector:
+      return "connector";
+    case Category::Other:
+      break;
   }
   return "other";
 }

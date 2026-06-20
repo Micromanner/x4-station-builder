@@ -2,14 +2,12 @@
 
 #include "app_paths.hpp"
 #include "mesh_cache.hpp"
+#include "raylib.h"
 #include "render.hpp"
-
 #include "x4sb/data/catalog.hpp"
 #include "x4sb/data/math.hpp"
 #include "x4sb/editorcore/display_flip.hpp"
 #include "x4sb/editorcore/editor_state.hpp"
-
-#include "raylib.h"
 
 #include <algorithm>
 #include <cmath>
@@ -119,7 +117,8 @@ int runConnBench(int modules, int frames, double spacingOverride) {
     std::fprintf(stderr, "connbench: no module with both meshes and connectors\n");
     return 1;
   }
-  const double spacing = spacingOverride > 0.0 ? spacingOverride : std::max(extentMax(def->aabb) * 2.0, 1500.0);
+  const double spacing =
+      spacingOverride > 0.0 ? spacingOverride : std::max(extentMax(def->aabb) * 2.0, 1500.0);
   const int n = std::max(modules, 1);
   const Station station = makeStation(*def, n, spacing);
   const std::size_t conns = station.modules().size() * def->connectionPoints.size();
@@ -133,10 +132,11 @@ int runConnBench(int modules, int frames, double spacingOverride) {
   state.selectByRay(centre + Vec3{0, spacing * 0.5, 0}, Vec3{0, -1, 0});
 
   const StationBounds bounds = stationBounds(station, *catalog);
-  std::printf("connbench: module=%s  modules=%d  connectors=%zu  spacing=%.0f  radius=%.0f  "
-              "selected=%s  frames=%d\n",
-              def->id.c_str(), n, conns, spacing, bounds.radius,
-              state.selected() ? "yes" : "NO(!)", std::max(frames, 1));
+  std::printf(
+      "connbench: module=%s  modules=%d  connectors=%zu  spacing=%.0f  radius=%.0f  "
+      "selected=%s  frames=%d\n",
+      def->id.c_str(), n, conns, spacing, bounds.radius, state.selected() ? "yes" : "NO(!)",
+      std::max(frames, 1));
 
   const Vec3 dt = flipZ(bounds.center);
   const ::Camera3D camera{
@@ -159,9 +159,8 @@ int runConnBench(int modules, int frames, double spacingOverride) {
       drawScene(station, *catalog, camera, meshes, /*showGizmos=*/false, /*showMeshes=*/true,
                 /*allConnectors=*/true);
     });
-    const Result newGrid = timed(f, [&] {
-      drawScene(state, camera, meshes, /*showGizmos=*/false, /*showMeshes=*/true);
-    });
+    const Result newGrid = timed(
+        f, [&] { drawScene(state, camera, meshes, /*showGizmos=*/false, /*showMeshes=*/true); });
 
     report("baseline (no connectors)", baseline);
     report("OLD: all connectors (pre-fix)", oldAll);

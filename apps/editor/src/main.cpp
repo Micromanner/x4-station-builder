@@ -6,24 +6,22 @@
 #include "connbench.hpp"
 #include "gizmoshot.hpp"
 #include "input.hpp"
-#include "loadbench.hpp"
-#include "mesh_cache.hpp"
-#include "orbit_camera.hpp"
-#include "megashot.hpp"
-#include "mesh_load.hpp"
-#include "plan_io.hpp"
 #include "iprofile.hpp"
+#include "loadbench.hpp"
+#include "megashot.hpp"
+#include "mesh_cache.hpp"
+#include "mesh_load.hpp"
+#include "orbit_camera.hpp"
+#include "plan_io.hpp"
 #include "profile.hpp"
 #include "profiling.hpp"
+#include "raylib.h"
 #include "rdc_capture.hpp"
 #include "render.hpp"
 #include "snaptest.hpp"
-
 #include "x4sb/data/catalog.hpp"
 #include "x4sb/editorcore/display_flip.hpp"
 #include "x4sb/editorcore/editor_state.hpp"
-
-#include "raylib.h"
 
 #include <cstdio>
 #include <cstdlib>
@@ -146,7 +144,8 @@ int main(int argc, char** argv) {
     state.setPlaceDistance(cam.distance());
     bool showGizmos = true;
     bool showMeshes = true;  // render-only state; not in EditorState (that's render-free)
-    bool lodEnabled = false;  // editor default: show every module as a mesh (L toggles distance-LOD)
+    bool lodEnabled =
+        false;  // editor default: show every module as a mesh (L toggles distance-LOD)
     std::string toast;
     double toastUntil = 0.0;
 
@@ -166,7 +165,8 @@ int main(int argc, char** argv) {
           state.setPlaceDistance(cam.distance());
         if (IsKeyPressed(KEY_G)) showGizmos = !showGizmos;
         if (IsKeyPressed(KEY_M)) showMeshes = !showMeshes;
-        if (IsKeyPressed(KEY_L)) lodEnabled = !lodEnabled;  // distance-LOD box collapse for huge stations
+        if (IsKeyPressed(KEY_L))
+          lodEnabled = !lodEnabled;  // distance-LOD box collapse for huge stations
         if (IsKeyPressed(KEY_F)) {
           ::Vector3 c{};
           float r = 20.0f;

@@ -106,8 +106,8 @@ TEST_CASE("zoomTowardCursor keeps the focal point fixed and clamps distance") {
   const Vec3 target{0, 0, -100};
   const Vec3 origin{0, 0, 0};
   const Vec3 dir = normalized(Vec3{10, 0, -100});  // crosses z=-100 at x=10
-  const ZoomResult r = zoomTowardCursor(target, 100.0, Vec3{0, 0, -1}, origin, dir, 0.5, 2.0,
-                                        1000000.0);
+  const ZoomResult r =
+      zoomTowardCursor(target, 100.0, Vec3{0, 0, -1}, origin, dir, 0.5, 2.0, 1000000.0);
   CHECK(r.distance == doctest::Approx(50.0));
   // Focal point P=(10,0,-100); newTarget = P + (target-P)*0.5 = (5,0,-100).
   CHECK(vclose(r.target, Vec3{5, 0, -100}, 1e-6));
@@ -117,8 +117,8 @@ TEST_CASE("zoomTowardCursor clamps to maxDistance and stops pivot migration ther
   const Vec3 target{0, 0, -100};
   const Vec3 dir = normalized(Vec3{10, 0, -100});
   // k=2 (zoom out) but already at the max => distance pinned, pivot unmoved.
-  const ZoomResult r = zoomTowardCursor(target, 100.0, Vec3{0, 0, -1}, Vec3{0, 0, 0}, dir, 2.0, 2.0,
-                                        100.0);
+  const ZoomResult r =
+      zoomTowardCursor(target, 100.0, Vec3{0, 0, -1}, Vec3{0, 0, 0}, dir, 2.0, 2.0, 100.0);
   CHECK(r.distance == doctest::Approx(100.0));
   CHECK(vclose(r.target, target, 1e-6));
 }
@@ -127,8 +127,8 @@ TEST_CASE("zoomTowardCursor falls back to a plain dolly at a grazing angle") {
   const Vec3 target{0, 0, -100};
   // Ray nearly parallel to the view plane (dir ~perpendicular to forward -Z).
   const Vec3 dir = normalized(Vec3{1, 0, 0});
-  const ZoomResult r = zoomTowardCursor(target, 100.0, Vec3{0, 0, -1}, Vec3{0, 0, 0}, dir, 0.5, 2.0,
-                                        1000000.0);
+  const ZoomResult r =
+      zoomTowardCursor(target, 100.0, Vec3{0, 0, -1}, Vec3{0, 0, 0}, dir, 0.5, 2.0, 1000000.0);
   CHECK(r.distance == doctest::Approx(50.0));
   CHECK(vclose(r.target, target, 1e-6));  // pivot unchanged on the grazing fallback
 }

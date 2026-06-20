@@ -11,11 +11,9 @@
 // tracked camera distance. The fix floors by the part's OWN Euclidean eye distance,
 // so a visible handle is a constant pixel size no matter where the pivot sits.
 #include "camera_math.hpp"  // x4sb::editor::{cameraBasis, zoomTowardCursor}
-
+#include "doctest/doctest.h"
 #include "x4sb/data/math.hpp"
 #include "x4sb/editorcore/gizmo.hpp"
-
-#include "doctest/doctest.h"
 
 #include <algorithm>
 #include <cmath>
@@ -23,8 +21,8 @@
 using namespace x4sb;
 using x4sb::editor::CameraBasis;
 using x4sb::editor::cameraBasis;
-using x4sb::editor::zoomTowardCursor;
 using x4sb::editor::ZoomResult;
+using x4sb::editor::zoomTowardCursor;
 
 namespace {
 
@@ -38,7 +36,7 @@ constexpr double kAspect = 1280.0 / 720.0;
 [[nodiscard]] Vec3 orbitEye(Vec3 target, double distance, double yaw, double pitch) {
   const double cp = std::cos(pitch);
   return Vec3{target.x + distance * cp * std::sin(yaw), target.y + distance * std::sin(pitch),
-             target.z + distance * cp * std::cos(yaw)};
+              target.z + distance * cp * std::cos(yaw)};
 }
 
 struct Px {

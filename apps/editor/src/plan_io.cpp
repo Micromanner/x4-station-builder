@@ -1,11 +1,9 @@
 #include "plan_io.hpp"
 
 #include "modifier_keys.hpp"
-
+#include "raylib.h"
 #include "x4sb/planio/plan.hpp"
 #include "x4sb/platform/platform.hpp"
-
-#include "raylib.h"
 
 #include <filesystem>
 #include <fstream>

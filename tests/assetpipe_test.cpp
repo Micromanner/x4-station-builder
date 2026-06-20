@@ -226,7 +226,7 @@ TEST_CASE("parsePartRef splits a cross-reference into component and part") {
 TEST_CASE("parsePartRef rejects an empty or separator-less ref") {
   CHECK_FALSE(parsePartRef("").has_value());
   CHECK_FALSE(parsePartRef("noseparator").has_value());
-  CHECK_FALSE(parsePartRef(".part").has_value());      // empty component
+  CHECK_FALSE(parsePartRef(".part").has_value());       // empty component
   CHECK_FALSE(parsePartRef("component.").has_value());  // empty part
 }
 

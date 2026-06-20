@@ -2,14 +2,12 @@
 
 #include "app_paths.hpp"
 #include "mesh_cache.hpp"
+#include "raylib.h"
 #include "render.hpp"
-
 #include "x4sb/data/catalog.hpp"
 #include "x4sb/data/math.hpp"
 #include "x4sb/editorcore/display_flip.hpp"
 #include "x4sb/planio/plan.hpp"
-
-#include "raylib.h"
 
 #include <cmath>
 #include <cstdio>
@@ -116,11 +114,10 @@ int runMegaShot(const std::string& planPath, const std::string& outPrefix) {
       const double pitch = 0.45;  // ~26 deg, a 3/4 elevation
       const Vec3 dirN{std::cos(pitch) * std::sin(yaw), std::sin(pitch),
                       std::cos(pitch) * std::cos(yaw)};
-      const ::Camera3D camera{
-          ::Vector3{target.x + static_cast<float>(dirN.x * dist),
-                    target.y + static_cast<float>(dirN.y * dist),
-                    target.z + static_cast<float>(dirN.z * dist)},
-          target, ::Vector3{0.0f, 1.0f, 0.0f}, 45.0f, CAMERA_PERSPECTIVE};
+      const ::Camera3D camera{::Vector3{target.x + static_cast<float>(dirN.x * dist),
+                                        target.y + static_cast<float>(dirN.y * dist),
+                                        target.z + static_cast<float>(dirN.z * dist)},
+                              target, ::Vector3{0.0f, 1.0f, 0.0f}, 45.0f, CAMERA_PERSPECTIVE};
 
       const RenderStats st = lodStats(*station, *catalog, camera);
       const double fps = renderAndCapture(*station, *catalog, camera, meshes,

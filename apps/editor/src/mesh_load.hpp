@@ -5,7 +5,6 @@
 // a progress bar, so the interactive view has no box->mesh pop-in and selecting /
 // moving never hitches on a late upload.
 #include "mesh_cache.hpp"
-
 #include "x4sb/data/catalog.hpp"
 #include "x4sb/document/station.hpp"
 

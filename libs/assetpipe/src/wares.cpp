@@ -19,7 +19,8 @@ void evalWare(const pugi::xml_node& w, std::vector<WareModule>& out) {
   m.wareId = w.attribute("id").as_string();
   m.nameRef = w.attribute("name").as_string();
   m.macroRef = macroRef;
-  m.playerBuildable = !detail::hasToken(tags, "noplayerblueprint") && !detail::hasToken(tags, "noblueprint");
+  m.playerBuildable =
+      !detail::hasToken(tags, "noplayerblueprint") && !detail::hasToken(tags, "noblueprint");
   if (!m.wareId.empty()) out.push_back(std::move(m));
 }
 

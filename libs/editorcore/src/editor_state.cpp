@@ -15,9 +15,8 @@ constexpr double kHalfPi = 1.5707963267948966;
 
 bool isInsidePlot(const AABB& box) {
   constexpr double kPlotLimit = 10000.0;  // 20km plot centered at origin => +/-10km
-  return box.min.x >= -kPlotLimit && box.max.x <= kPlotLimit &&
-         box.min.y >= -kPlotLimit && box.max.y <= kPlotLimit &&
-         box.min.z >= -kPlotLimit && box.max.z <= kPlotLimit;
+  return box.min.x >= -kPlotLimit && box.max.x <= kPlotLimit && box.min.y >= -kPlotLimit &&
+         box.max.y <= kPlotLimit && box.min.z >= -kPlotLimit && box.max.z <= kPlotLimit;
 }
 
 Transform clampToPlot(const AABB& localAabb, Transform t) {
@@ -115,8 +114,7 @@ void EditorState::updateGhost(Vec3 rayOriginX4, Vec3 rayDirX4, bool forceFree) {
 
   // Snap path: aim at a placed module and mate onto its nearest free connector.
   if (!forceFree && !station_.empty()) {
-    const std::optional<InstanceId> hitId =
-        pickModule(station_, catalog_, rayOriginX4, rayDirX4);
+    const std::optional<InstanceId> hitId = pickModule(station_, catalog_, rayOriginX4, rayDirX4);
     if (hitId) {
       const PlacedModule* pm = station_.find(*hitId);
       const ModuleDef* hitDef = pm ? catalog_.find(pm->defId) : nullptr;
@@ -235,20 +233,21 @@ void EditorState::updateGizmoDrag(Vec3 rayOriginX4, Vec3 rayDirX4, bool forceFre
   // Rotation handles spin the module in place about the ring axis — no translation,
   // no snap-on-move.
   if (gizmoIsRotation(drag_->handle)) {
-    const double angle = gizmoDragRotation(drag_->handle, drag_->startTransform.position,
-                                           drag_->startRayOrigin, drag_->startRayDir, rayOriginX4,
-                                           rayDirX4);
+    const double angle =
+        gizmoDragRotation(drag_->handle, drag_->startTransform.position, drag_->startRayOrigin,
+                          drag_->startRayDir, rayOriginX4, rayDirX4);
     Transform rotated = drag_->startTransform;
-    rotated.rotation = axisAngle(gizmoAxisDir(drag_->handle), angle) * drag_->startTransform.rotation;
+    rotated.rotation =
+        axisAngle(gizmoAxisDir(drag_->handle), angle) * drag_->startTransform.rotation;
     rotated = clampToPlot(def->aabb, rotated);
     drag_->snap.reset();
     drag_->preview = rotated;
     return;
   }
 
-  const Vec3 delta = gizmoDragDelta(drag_->handle, drag_->startTransform.position,
-                                    drag_->startRayOrigin, drag_->startRayDir, rayOriginX4,
-                                    rayDirX4);
+  const Vec3 delta =
+      gizmoDragDelta(drag_->handle, drag_->startTransform.position, drag_->startRayOrigin,
+                     drag_->startRayDir, rayOriginX4, rayDirX4);
   Transform freePose = drag_->startTransform;
   freePose.position = drag_->startTransform.position + delta;
   freePose = clampToPlot(def->aabb, freePose);
@@ -287,7 +286,7 @@ bool EditorState::endGizmoDrag() {
 
   if (d.snap) {
     execute(std::make_unique<SnapMoveCommand>(d.id, d.preview, d.snap->instanceId,
-                                             d.snap->newPointId, d.snap->targetPointId));
+                                              d.snap->newPointId, d.snap->targetPointId));
     return true;
   }
   // Commit if the pose actually changed in position OR orientation — a rotation
@@ -341,7 +340,7 @@ std::vector<SnapLink> EditorState::activeSnapLinks() const {
       if (tdef == nullptr || e.connectorIndex >= tdef->connectionPoints.size()) continue;
       const ConnectionPoint& tp = tdef->connectionPoints[e.connectorIndex];
       if (connectorIsLinked(*target, tp.id)) continue;  // target already occupied
-      if (!connectorsCompatible(np, tp)) continue;       // type tags incompatible
+      if (!connectorsCompatible(np, tp)) continue;      // type tags incompatible
       out.push_back(SnapLink{npWorld, e.world});
     }
   }

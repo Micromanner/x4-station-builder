@@ -108,8 +108,10 @@ std::string meshToGltf(const XmfMesh& mesh, bool deindex) {
     const std::size_t idxBytes = blob.size() - posBytes;
     bufferViews.push_back(
         {{"buffer", 0}, {"byteOffset", posBytes}, {"byteLength", idxBytes}, {"target", 34963}});
-    doc["accessors"].push_back(
-        {{"bufferView", 1}, {"componentType", 5125}, {"count", mesh.indices.size()}, {"type", "SCALAR"}});
+    doc["accessors"].push_back({{"bufferView", 1},
+                                {"componentType", 5125},
+                                {"count", mesh.indices.size()},
+                                {"type", "SCALAR"}});
     primitive["indices"] = 1;
   }
 

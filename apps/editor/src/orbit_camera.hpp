@@ -1,9 +1,8 @@
 #pragma once
 // A spherical orbit camera driven by the right mouse button (so left-click stays
 // free for placement/selection) and the wheel. Render-side; links raylib.
-#include "x4sb/data/math.hpp"
-
 #include "raylib.h"
+#include "x4sb/data/math.hpp"
 
 #include <optional>
 

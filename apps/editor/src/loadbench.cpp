@@ -3,14 +3,12 @@
 #include "app_paths.hpp"
 #include "mesh_cache.hpp"
 #include "mesh_load.hpp"
+#include "raylib.h"
 #include "render.hpp"
-
 #include "x4sb/data/catalog.hpp"
 #include "x4sb/document/station.hpp"
 #include "x4sb/editorcore/display_flip.hpp"
 #include "x4sb/editorcore/mesh_paths.hpp"
-
-#include "raylib.h"
 
 #include <algorithm>
 #include <cmath>
@@ -113,8 +111,8 @@ int runLoadBench(int modules) {
     int resident = 0;
     int absent = 0;
     for (const std::string& p : paths) (meshes.get(p) != nullptr) ? ++resident : ++absent;
-    std::printf("loadbench: pre-warm %.0f ms -> resident=%d missing/oversized=%d (of %zu)\n", loadMs,
-                resident, absent, paths.size());
+    std::printf("loadbench: pre-warm %.0f ms -> resident=%d missing/oversized=%d (of %zu)\n",
+                loadMs, resident, absent, paths.size());
 
     const Vec3 dt = flipZ(bounds.center);
     const double dist = std::max(bounds.radius, 1.0) * 1.6;

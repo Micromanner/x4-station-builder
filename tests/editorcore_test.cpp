@@ -1,6 +1,5 @@
-#include "x4sb/editorcore/editor_state.hpp"
-
 #include "x4sb/data/catalog.hpp"
+#include "x4sb/editorcore/editor_state.hpp"
 
 #include <doctest/doctest.h>
 
@@ -8,8 +7,8 @@ using namespace x4sb;
 
 namespace {
 // Build a module with a single connection point (mirrors snap_test's helper).
-ModuleDef makeModule(const std::string& id, Category cat, const std::string& pointId,
-                     Vec3 pointPos, const std::string& type = "") {
+ModuleDef makeModule(const std::string& id, Category cat, const std::string& pointId, Vec3 pointPos,
+                     const std::string& type = "") {
   ModuleDef d;
   d.id = id;
   d.category = cat;
@@ -126,7 +125,7 @@ TEST_CASE("free-place uses a camera standoff, not the ground plane") {
 
 TEST_CASE("snap ghost: aim at a placed module -> previews onto its free connector") {
   const ModuleCatalog c = twoModuleCatalog();  // a_mod conn a1 at (+0.5,0,0); b_mod conn b1
-  EditorState s(c);  // active = a_mod
+  EditorState s(c);                            // active = a_mod
 
   // Free-place a_mod as the root at the origin (ray down at (0,0,0)).
   s.updateGhost(Vec3{0, 10, 0}, Vec3{0, -1, 0});
@@ -139,7 +138,7 @@ TEST_CASE("snap ghost: aim at a placed module -> previews onto its free connecto
   s.updateGhost(/*origin=*/Vec3{0, 0, -10}, /*dir=*/Vec3{0, 0, 1});  // hits a_mod at origin
 
   REQUIRE(s.ghost().has_value());
-  REQUIRE(s.ghost()->candidate.has_value());          // snapped, not root
+  REQUIRE(s.ghost()->candidate.has_value());  // snapped, not root
   CHECK(s.ghost()->candidate->targetPointId == "a1");
   CHECK(s.ghost()->candidate->newPointId == "b1");
   CHECK(s.ghost()->defId == "b_mod");
@@ -175,8 +174,8 @@ TEST_CASE("togglePlacement: select mode suppresses the ghost so clicks can selec
   s.togglePlacement();  // -> select mode
   CHECK_FALSE(s.placementEnabled());
   s.updateGhost(Vec3{0, 10, 0}, Vec3{0, -1, 0});
-  CHECK_FALSE(s.ghost().has_value());          // no ghost -> a left-click will select
-  CHECK(s.commitGhost() == std::nullopt);      // nothing to commit in select mode
+  CHECK_FALSE(s.ghost().has_value());      // no ghost -> a left-click will select
+  CHECK(s.commitGhost() == std::nullopt);  // nothing to commit in select mode
 
   s.togglePlacement();  // -> back to build mode
   CHECK(s.placementEnabled());
@@ -248,7 +247,7 @@ TEST_CASE("forceFree overrides an available snap target") {
 TEST_CASE("rotateGhost orients the free placement ghost in 90-degree steps") {
   const ModuleCatalog c = twoModuleCatalog();
   EditorState s(c);
-  s.rotateGhost(Vec3{0, 1, 0});  // +90 about Y
+  s.rotateGhost(Vec3{0, 1, 0});                   // +90 about Y
   s.updateGhost(Vec3{0, 10, 0}, Vec3{0, -1, 0});  // empty station -> free root ghost
   REQUIRE(s.ghost().has_value());
   const Vec3 r = rotate(s.ghost()->worldTransform.rotation, Vec3{1, 0, 0});
@@ -369,7 +368,7 @@ TEST_CASE("gizmo hover: highlightHandle tracks the handle under the cursor") {
   s.selectByRay(Vec3{0, 0, -10}, Vec3{0, 0, 1});
   REQUIRE(s.selected().value() == id);
 
-  const double scale = 5.0;  // gizmo at origin, axisLength 5
+  const double scale = 5.0;                                  // gizmo at origin, axisLength 5
   s.updateGizmoHover(Vec3{2, 5, 0}, Vec3{0, -1, 0}, scale);  // down the +X axis
   REQUIRE(s.highlightHandle().has_value());
   CHECK(*s.highlightHandle() == GizmoHandle::AxisX);
@@ -440,28 +439,29 @@ TEST_CASE("plot boundary box validation constraints") {
 
   // 1. Ghost inside is valid, ghost outside (e.g. at 12000m) is invalid
   s.setPlaceDistance(100.0);
-  s.updateGhost(Vec3{0, 0, 0}, Vec3{1, 0, 0}); // pos = 100,0,0
+  s.updateGhost(Vec3{0, 0, 0}, Vec3{1, 0, 0});  // pos = 100,0,0
   REQUIRE(s.ghost().has_value());
   CHECK(s.ghost()->valid);
 
   s.setPlaceDistance(12000.0);
-  s.updateGhost(Vec3{0, 0, 0}, Vec3{1, 0, 0}); // pos = 12000,0,0
+  s.updateGhost(Vec3{0, 0, 0}, Vec3{1, 0, 0});  // pos = 12000,0,0
   REQUIRE(s.ghost().has_value());
-  CHECK(s.ghost()->valid); // Ghost is clamped inside, so it is valid!
-  CHECK(s.ghost()->worldTransform.position.x == doctest::Approx(9998.5)); // 9999.0 - 0.5 (half-width)
+  CHECK(s.ghost()->valid);  // Ghost is clamped inside, so it is valid!
+  CHECK(s.ghost()->worldTransform.position.x ==
+        doctest::Approx(9998.5));  // 9999.0 - 0.5 (half-width)
 
   // Reset to default place distance
   s.setPlaceDistance(10.0);
-  s.updateGhost(Vec3{0, 10, 0}, Vec3{0, -1, 0}); // pos = 0,0,0
+  s.updateGhost(Vec3{0, 10, 0}, Vec3{0, -1, 0});  // pos = 0,0,0
   const InstanceId id = s.commitGhost().value();
 
   // 2. Dragging outside plot boundary should clamp the position
   s.selectByRay(Vec3{0, 0, -10}, Vec3{0, 0, 1});
   const double scale = 5.0;
-  REQUIRE(s.beginGizmoDrag(Vec3{2, 5, 0}, Vec3{0, -1, 0}, scale)); // Grab X axis
-  s.updateGizmoDrag(Vec3{12000, 5, 0}, Vec3{0, -1, 0}); // Drag to 12000 (outside)
-  CHECK(s.endGizmoDrag()); // commit succeeds
-  
+  REQUIRE(s.beginGizmoDrag(Vec3{2, 5, 0}, Vec3{0, -1, 0}, scale));  // Grab X axis
+  s.updateGizmoDrag(Vec3{12000, 5, 0}, Vec3{0, -1, 0});             // Drag to 12000 (outside)
+  CHECK(s.endGizmoDrag());                                          // commit succeeds
+
   // Position is clamped to 9998.5
   CHECK(s.station().find(id)->worldTransform.position.x == doctest::Approx(9998.5));
 }
@@ -485,7 +485,7 @@ TEST_CASE("gizmo mode: defaults to Translate, settable, resets when a module is 
 
 TEST_CASE("activeSnapLinks: shows the approaching connector pair before snapping") {
   const ModuleCatalog c = twoModuleCatalog();  // a_mod conn a1 at local (+0.5,0,0)
-  EditorState s(c);  // active = a_mod
+  EditorState s(c);                            // active = a_mod
 
   // Root-place a_mod at the origin: its free connector a1 sits at world (0.5,0,0).
   s.updateGhost(Vec3{0, 10, 0}, Vec3{0, -1, 0});
@@ -502,9 +502,9 @@ TEST_CASE("activeSnapLinks: shows the approaching connector pair before snapping
 
   const std::vector<SnapLink> links = s.activeSnapLinks();
   REQUIRE(links.size() == 1);
-  CHECK(links[0].fromWorld.x == doctest::Approx(0.5));   // b1 at the ghost pose
+  CHECK(links[0].fromWorld.x == doctest::Approx(0.5));  // b1 at the ghost pose
   CHECK(links[0].fromWorld.z == doctest::Approx(50.0));
-  CHECK(links[0].toWorld.x == doctest::Approx(0.5));     // a1 on the placed module
+  CHECK(links[0].toWorld.x == doctest::Approx(0.5));  // a1 on the placed module
   CHECK(links[0].toWorld.z == doctest::Approx(0.0));
 }
 
@@ -550,7 +550,7 @@ TEST_CASE("activeSnapLinks: empty when far, empty with no ghost/drag") {
   s.cycleActive(1);  // b_mod
   s.setPlaceDistance(5000.0);
   s.updateGhost(Vec3{1, 0, 0}, Vec3{0, 0, 1}, /*forceFree=*/true);  // b1 ~5000 away
-  CHECK(s.activeSnapLinks().empty());  // beyond lineRadius_
+  CHECK(s.activeSnapLinks().empty());                               // beyond lineRadius_
 }
 
 TEST_CASE("dock clearance always blocks placement, even with overlap allowed") {
@@ -604,14 +604,14 @@ TEST_CASE("overlap is blocked by default and allowed by the toggle") {
   // Free-place another a_mod overlapping the first (ray down onto origin, Alt = forceFree).
   s.updateGhost(Vec3{0, 10, 0}, Vec3{0, -1, 0}, /*forceFree=*/true);
   REQUIRE(s.ghost().has_value());
-  CHECK_FALSE(s.ghost()->valid);            // overlaps -> invalid
-  CHECK_FALSE(s.commitGhost().has_value()); // commit rejected
+  CHECK_FALSE(s.ghost()->valid);             // overlaps -> invalid
+  CHECK_FALSE(s.commitGhost().has_value());  // commit rejected
 
   s.setAllowOverlap(true);
   CHECK(s.allowOverlap());
   s.updateGhost(Vec3{0, 10, 0}, Vec3{0, -1, 0}, /*forceFree=*/true);
   REQUIRE(s.ghost().has_value());
-  CHECK(s.ghost()->valid);                  // bypassed -> valid
+  CHECK(s.ghost()->valid);  // bypassed -> valid
   CHECK(s.commitGhost().has_value());
 }
 
@@ -624,4 +624,3 @@ TEST_CASE("showAllClearance is render-only state: defaults off, round-trips") {
   s.setShowAllClearance(false);
   CHECK_FALSE(s.showAllClearance());
 }
-

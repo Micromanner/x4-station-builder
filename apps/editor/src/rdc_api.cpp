@@ -23,8 +23,7 @@ RENDERDOC_API_1_4_0* loadApi() {
 #pragma GCC diagnostic push
 #pragma GCC diagnostic ignored "-Wcast-function-type"
 #endif
-  const auto getApi =
-      reinterpret_cast<pRENDERDOC_GetAPI>(GetProcAddress(mod, "RENDERDOC_GetAPI"));
+  const auto getApi = reinterpret_cast<pRENDERDOC_GetAPI>(GetProcAddress(mod, "RENDERDOC_GetAPI"));
 #if defined(__GNUC__)
 #pragma GCC diagnostic pop
 #endif

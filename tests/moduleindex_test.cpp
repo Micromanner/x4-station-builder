@@ -22,8 +22,8 @@ TEST_CASE("parseModuleIndex maps lower-cased names to normalized .xml paths") {
 }
 
 TEST_CASE("parseModuleIndex is fail-safe on malformed or empty entries") {
-  CHECK(parseModuleIndex("<not xml").empty());      // unparseable -> empty map
-  CHECK(parseModuleIndex("").empty());               // empty input -> empty map
+  CHECK(parseModuleIndex("<not xml").empty());  // unparseable -> empty map
+  CHECK(parseModuleIndex("").empty());          // empty input -> empty map
   // entries missing name or value are skipped; the valid one survives
   const auto idx = parseModuleIndex(
       R"(<index><entry value="a\b"/><entry name="keep_macro" value="c\d"/><entry name="nopath"/></index>)");

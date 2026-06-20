@@ -59,9 +59,9 @@ void OrbitCamera::update(std::optional<Vec3> zoomFocus) {
     const ::Vector2 d = GetMouseDelta();
     // Screen-space scale so a pixel of drag maps to a constant world distance at
     // the pivot depth, regardless of zoom.
-    const double scale =
-        pixelsToWorldAtDepth(static_cast<double>(cam_.fovy) * static_cast<double>(DEG2RAD),
-                             static_cast<double>(GetScreenHeight()), static_cast<double>(distance_));
+    const double scale = pixelsToWorldAtDepth(
+        static_cast<double>(cam_.fovy) * static_cast<double>(DEG2RAD),
+        static_cast<double>(GetScreenHeight()), static_cast<double>(distance_));
     target_ = toRl(toVec3(target_) +
                    panOffset(basis, static_cast<double>(d.x), static_cast<double>(d.y), scale));
     rebuild();

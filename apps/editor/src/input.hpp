@@ -1,10 +1,9 @@
 #pragma once
 // Maps this frame's mouse + keyboard into EditorState mutations. Owns the
 // display->X4 ray flip (parent §4/§8); EditorState only ever sees X4-space rays.
+#include "raylib.h"
 #include "x4sb/editorcore/editor_state.hpp"
 #include "x4sb/editorcore/gizmo.hpp"
-
-#include "raylib.h"
 
 #include <optional>
 

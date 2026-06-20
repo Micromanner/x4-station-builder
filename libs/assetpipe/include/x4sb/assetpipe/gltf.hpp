@@ -17,6 +17,7 @@ namespace x4sb {
 std::string meshToGltf(const XmfMesh& mesh, bool deindex = false);
 
 // Write meshToGltf() to a file. Returns false on empty mesh or IO error.
-[[nodiscard]] bool writeGltfFile(const XmfMesh& mesh, const std::string& path, bool deindex = false);
+[[nodiscard]] bool writeGltfFile(const XmfMesh& mesh, const std::string& path,
+                                 bool deindex = false);
 
 }  // namespace x4sb

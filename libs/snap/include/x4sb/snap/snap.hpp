@@ -39,10 +39,10 @@ struct SnapCandidate {
 // Nearest free, compatible connection point within `radius`, or nullopt.
 // `ignoreInstanceId` (default 0 = none) is skipped — used by snap-on-move so the
 // dragged module is never matched against its own connectors.
-std::optional<SnapCandidate> findSnapCandidate(const ModuleDef& newDef, Vec3 cursorWorldPos,
-                                               const Station& station, const ModuleCatalog& catalog,
-                                               double radius, InstanceId ignoreInstanceId = 0,
-                                               std::optional<Transform> newDefTransform = std::nullopt);
+std::optional<SnapCandidate> findSnapCandidate(
+    const ModuleDef& newDef, Vec3 cursorWorldPos, const Station& station,
+    const ModuleCatalog& catalog, double radius, InstanceId ignoreInstanceId = 0,
+    std::optional<Transform> newDefTransform = std::nullopt);
 
 // Grid-accelerated equivalent of findSnapCandidate: identical result, but uses a
 // prebuilt ConnectorGrid to consider only connectors near the query point instead
@@ -50,9 +50,9 @@ std::optional<SnapCandidate> findSnapCandidate(const ModuleDef& newDef, Vec3 cur
 // from the same `station`/`catalog`. `queryPoint` is the cursor world position
 // (cursor mode) or the dragged pose's position (snap-on-move; pass newDefTransform).
 [[nodiscard]] std::optional<SnapCandidate> findSnapCandidate(
-    const ModuleDef& newDef, Vec3 queryPoint, const Station& station,
-    const ModuleCatalog& catalog, const ConnectorGrid& grid, double radius,
-    InstanceId ignoreInstanceId = 0, std::optional<Transform> newDefTransform = std::nullopt);
+    const ModuleDef& newDef, Vec3 queryPoint, const Station& station, const ModuleCatalog& catalog,
+    const ConnectorGrid& grid, double radius, InstanceId ignoreInstanceId = 0,
+    std::optional<Transform> newDefTransform = std::nullopt);
 
 // AABB overlap test of a candidate placement against all OTHER placed modules
 // (the joint itself cannot overlap). `ignoreInstanceId` is skipped.

@@ -4,15 +4,13 @@
 #include "mesh_cache.hpp"
 #include "mesh_load.hpp"
 #include "profiling.hpp"
+#include "raylib.h"
 #include "render.hpp"
-
 #include "x4sb/data/catalog.hpp"
 #include "x4sb/data/math.hpp"
 #include "x4sb/editorcore/display_flip.hpp"
 #include "x4sb/editorcore/editor_state.hpp"
 #include "x4sb/planio/plan.hpp"
-
-#include "raylib.h"
 
 #include <algorithm>
 #include <cmath>
@@ -132,10 +130,11 @@ int runInteractiveProfile(const std::string& planPath, int frames) {
       for (const double ms : frameMs) sum += ms;
       const double mean = sum / static_cast<double>(frameMs.size());
       std::sort(frameMs.begin(), frameMs.end());
-      std::printf("iprofile: frames=%zu  mean=%.2fms (%.0f fps)  p50=%.2f  p95=%.2f  p99=%.2f  "
-                  "max=%.2fms\n",
-                  frameMs.size(), mean, mean > 0 ? 1000.0 / mean : 0.0, percentile(frameMs, 0.50),
-                  percentile(frameMs, 0.95), percentile(frameMs, 0.99), frameMs.back());
+      std::printf(
+          "iprofile: frames=%zu  mean=%.2fms (%.0f fps)  p50=%.2f  p95=%.2f  p99=%.2f  "
+          "max=%.2fms\n",
+          frameMs.size(), mean, mean > 0 ? 1000.0 / mean : 0.0, percentile(frameMs, 0.50),
+          percentile(frameMs, 0.95), percentile(frameMs, 0.99), frameMs.back());
     }
   }
   CloseWindow();

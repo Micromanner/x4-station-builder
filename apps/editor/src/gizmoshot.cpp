@@ -4,9 +4,9 @@
 #include "camera_math.hpp"  // zoomTowardCursor, cameraBasis
 #include "input.hpp"        // gizmoScaleFor
 #include "mesh_cache.hpp"
+#include "raylib.h"
 #include "raylib_convert.hpp"  // toRl
 #include "render.hpp"
-
 #include "x4sb/data/catalog.hpp"
 #include "x4sb/data/math.hpp"
 #include "x4sb/data/types.hpp"
@@ -14,8 +14,6 @@
 #include "x4sb/editorcore/display_flip.hpp"
 #include "x4sb/editorcore/editor_state.hpp"
 #include "x4sb/editorcore/gizmo.hpp"
-
-#include "raylib.h"
 
 #include <algorithm>
 #include <cmath>
@@ -78,11 +76,10 @@ void shoot(const EditorState& state, const ::Camera3D& camera, MeshCache& meshes
 // + the fovy=60 perspective set in OrbitCamera's ctor).
 [[nodiscard]] ::Camera3D orbitCam(::Vector3 target, double dist, double yaw, double pitch) {
   const double cp = std::cos(pitch);
-  return ::Camera3D{
-      ::Vector3{target.x + static_cast<float>(dist * cp * std::sin(yaw)),
-                target.y + static_cast<float>(dist * std::sin(pitch)),
-                target.z + static_cast<float>(dist * cp * std::cos(yaw))},
-      target, ::Vector3{0.0F, 1.0F, 0.0F}, 60.0F, CAMERA_PERSPECTIVE};
+  return ::Camera3D{::Vector3{target.x + static_cast<float>(dist * cp * std::sin(yaw)),
+                              target.y + static_cast<float>(dist * std::sin(pitch)),
+                              target.z + static_cast<float>(dist * cp * std::cos(yaw))},
+                    target, ::Vector3{0.0F, 1.0F, 0.0F}, 60.0F, CAMERA_PERSPECTIVE};
 }
 
 // The gizmo's true on-screen size: the longest axis arm in PIXELS, measured with
@@ -130,8 +127,8 @@ void sweep(const EditorState& state, ::Vector3 moduleDisp, double cursorNdcX, do
     minPx = std::min(minPx, armPx);
     maxPx = std::max(maxPx, armPx);
 
-    const Vec3 rayDir = x4sb::editor::normalized(
-        basis.forward + basis.right * (cursorNdcX * kTanHalfFov * aspect));
+    const Vec3 rayDir =
+        x4sb::editor::normalized(basis.forward + basis.right * (cursorNdcX * kTanHalfFov * aspect));
     const double k = 1.0 - wheel * 0.1;
     const x4sb::editor::ZoomResult z = x4sb::editor::zoomTowardCursor(
         toVec3(cam.target), distance, basis.forward, toVec3(cam.position), rayDir, k, 2.0, 40000.0);

@@ -96,11 +96,14 @@ inline AABB operator+(const AABB& b, Vec3 t) { return {b.min + t, b.max + t}; }
 // all 8 corners, then take their component-wise min/max. Conservative (>= the true
 // rotated box), which is the safe direction for a collision-reject test.
 [[nodiscard]] inline AABB worldAabb(const AABB& local, const Transform& t) {
-  const std::array<Vec3, 8> corners{{
-      {local.min.x, local.min.y, local.min.z}, {local.max.x, local.min.y, local.min.z},
-      {local.min.x, local.max.y, local.min.z}, {local.max.x, local.max.y, local.min.z},
-      {local.min.x, local.min.y, local.max.z}, {local.max.x, local.min.y, local.max.z},
-      {local.min.x, local.max.y, local.max.z}, {local.max.x, local.max.y, local.max.z}}};
+  const std::array<Vec3, 8> corners{{{local.min.x, local.min.y, local.min.z},
+                                     {local.max.x, local.min.y, local.min.z},
+                                     {local.min.x, local.max.y, local.min.z},
+                                     {local.max.x, local.max.y, local.min.z},
+                                     {local.min.x, local.min.y, local.max.z},
+                                     {local.max.x, local.min.y, local.max.z},
+                                     {local.min.x, local.max.y, local.max.z},
+                                     {local.max.x, local.max.y, local.max.z}}};
   const Vec3 c0 = apply(t, corners[0]);
   AABB out{c0, c0};
   for (std::size_t i = 1; i < corners.size(); ++i) expand(out, apply(t, corners[i]));

@@ -231,8 +231,7 @@ TEST_CASE("makeSnapPlacement returns an executable command for an in-range targe
   pa.worldTransform.position = {10, 0, 0};  // connector world pos = {10,0,0}
   station.add(pa);
 
-  std::unique_ptr<Command> cmd =
-      makeSnapPlacement(bdef, Vec3{10.2, 0, 0}, station, catalog, 1.0);
+  std::unique_ptr<Command> cmd = makeSnapPlacement(bdef, Vec3{10.2, 0, 0}, station, catalog, 1.0);
   REQUIRE(cmd != nullptr);
 
   UndoStack stack;
@@ -360,7 +359,8 @@ TEST_CASE("integration: snap-place then pick then move detaches and undo reattac
   CHECK(station.find(idB)->worldTransform.position.x == doctest::Approx(-1));
 }
 
-TEST_CASE("findSnapCandidate uses connector-to-connector distance when newDefTransform is provided") {
+TEST_CASE(
+    "findSnapCandidate uses connector-to-connector distance when newDefTransform is provided") {
   ModuleCatalog catalog;
   catalog.add(makeModule("A", "a1", {0.5, 0, 0}));
   const ModuleDef newDef = makeModule("B", "b1", {-0.5, 0, 0});
@@ -384,7 +384,8 @@ TEST_CASE("findSnapCandidate uses connector-to-connector distance when newDefTra
   CHECK_FALSE(miss.has_value());
 
   // Using newDefTransform: should hit because connector distance is 1.0 <= 1.2
-  const auto hit = findSnapCandidate(newDef, freePose.position, station, catalog, 1.2, ida + 1, freePose);
+  const auto hit =
+      findSnapCandidate(newDef, freePose.position, station, catalog, 1.2, ida + 1, freePose);
   REQUIRE(hit.has_value());
   CHECK(hit->instanceId == ida);
   CHECK(hit->targetPointId == "a1");
@@ -435,8 +436,7 @@ TEST_CASE("grid-backed findSnapCandidate matches brute force (snap-on-move)") {
   for (double px : {3.0, 1000.0, 8000.0}) {
     Transform newXf;
     newXf.position = {px, 0, 0};
-    const auto brute =
-        findSnapCandidate(newDef, newXf.position, station, catalog, 300.0, 0, newXf);
+    const auto brute = findSnapCandidate(newDef, newXf.position, station, catalog, 300.0, 0, newXf);
     const auto fast =
         findSnapCandidate(newDef, newXf.position, station, catalog, grid, 300.0, 0, newXf);
     CHECK(brute.has_value() == fast.has_value());
@@ -469,9 +469,9 @@ TEST_CASE("collidesClearance flags a module blocking a dock corridor") {
   dock.id = "DOCK";
   dock.aabb = AABB{{-5, -5, -5}, {5, 5, 5}};
   ClearanceVolume cv;
-  cv.rotation = Quat{};                 // outward = +Z
+  cv.rotation = Quat{};  // outward = +Z
   cv.halfExtents = {50, 50, 300};
-  cv.center = {0, 0, 300};              // spans z[0,600]
+  cv.center = {0, 0, 300};  // spans z[0,600]
   cv.shipSize = "dock_l";
   dock.clearanceVolumes.push_back(cv);
   catalog.add(dock);
@@ -558,8 +558,7 @@ TEST_CASE("collidesWithStation two-id overload skips both instances") {
   const InstanceId id1 = station.add(p1);
 
   Transform at0;  // overlaps both id0 (origin) and the touching id1
-  CHECK(collidesWithStation(box, at0, 0, 0, station, catalog));        // nothing ignored
-  CHECK(collidesWithStation(box, at0, id0, 0, station, catalog));      // still hits id1 (touch)
+  CHECK(collidesWithStation(box, at0, 0, 0, station, catalog));            // nothing ignored
+  CHECK(collidesWithStation(box, at0, id0, 0, station, catalog));          // still hits id1 (touch)
   CHECK_FALSE(collidesWithStation(box, at0, id0, id1, station, catalog));  // both ignored
 }
-

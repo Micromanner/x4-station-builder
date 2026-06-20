@@ -182,9 +182,9 @@ class EditorState {
   std::size_t activeIndex_{0};
   std::optional<InstanceId> selected_;
   std::optional<Ghost> ghost_;
-  Quat pendingRotation_{};   // orients the free-place ghost; reset on commit
-  bool placementEnabled_{true};  // false = select mode (no ghost; clicks select)
-  bool allowOverlap_{false};  // false = block overlap (mirrors X4's editor default)
+  Quat pendingRotation_{};        // orients the free-place ghost; reset on commit
+  bool placementEnabled_{true};   // false = select mode (no ghost; clicks select)
+  bool allowOverlap_{false};      // false = block overlap (mirrors X4's editor default)
   bool showAllClearance_{false};  // render-only: draw every dock's corridor when true
 
   mutable std::optional<ConnectorGrid> connectorGrid_;  // built lazily by connectorGrid()

@@ -35,8 +35,7 @@ TEST_CASE("compose matches applying both transforms in sequence") {
   const Transform ab = compose(a, b);
 
   // The defining identity: apply(compose(a,b), v) == apply(a, apply(b, v)).
-  const std::array<Vec3, 4> samples{
-      {Vec3{0, 0, 0}, Vec3{1, 0, 0}, Vec3{0, 1, 0}, Vec3{-3, 2, 5}}};
+  const std::array<Vec3, 4> samples{{Vec3{0, 0, 0}, Vec3{1, 0, 0}, Vec3{0, 1, 0}, Vec3{-3, 2, 5}}};
   for (const Vec3 v : samples) {
     const Vec3 viaCompose = apply(ab, v);
     const Vec3 viaSequence = apply(a, apply(b, v));
@@ -135,5 +134,6 @@ TEST_CASE("worldAabb rotates a box's hull conservatively") {
   const double h = 3.14159265358979323846 / 8.0;  // half of 45deg
   r45.rotation = Quat{std::cos(h), 0, 0, std::sin(h)};
   const AABB w45 = worldAabb(local, r45);
-  CHECK(w45.max.x == doctest::Approx(3.0 * std::sqrt(2.0) / 2.0));  // ~2.1213 > either original extent
+  CHECK(w45.max.x ==
+        doctest::Approx(3.0 * std::sqrt(2.0) / 2.0));  // ~2.1213 > either original extent
 }

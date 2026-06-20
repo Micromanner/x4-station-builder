@@ -38,8 +38,7 @@ struct ResolvedModule {
 // `visit` once per resolved module, in ware order. A module that fails to resolve
 // is appended to `skipped` ("wareId: reason") and skipped — never fatal. All file
 // access goes through `extract`.
-void forEachResolvedModule(const ExtractFn& extract,
-                           const std::vector<std::string>& sourcePrefixes,
+void forEachResolvedModule(const ExtractFn& extract, const std::vector<std::string>& sourcePrefixes,
                            const std::function<void(const ResolvedModule&)>& visit,
                            std::vector<std::string>& skipped);
 

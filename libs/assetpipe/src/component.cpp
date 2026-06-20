@@ -28,8 +28,7 @@ std::string normalizeTags(const std::string& raw) {
 }
 
 Vec3 readXyz(const pugi::xml_node& n) {
-  return {n.attribute("x").as_double(), n.attribute("y").as_double(),
-          n.attribute("z").as_double()};
+  return {n.attribute("x").as_double(), n.attribute("y").as_double(), n.attribute("z").as_double()};
 }
 
 // Normalize a '/'-separated logical folder: collapse runs of '/' to one and
@@ -95,15 +94,15 @@ ClearanceBox clearanceBox(const std::string& tags) {
     return {35, 35, 200, "s"};  // 70 x 70 x 400
   if (detail::hasToken(tags, "ship_xs") || detail::hasToken(tags, "dock_xs"))
     return {35, 35, 200, "xs"};  // 70 x 70 x 400
-  return {90, 90, 250, "m"};  // default to M-class when unclassified
+  return {90, 90, 250, "m"};     // default to M-class when unclassified
 }
 
 // Unit quaternion rotating local +Z onto `dir` (unit). The clearance OBB's local
 // Z is its corridor (long) axis, so this orients a computed launch->dock corridor.
 Quat quatFromUnitZTo(Vec3 dir) {
-  const double d = dir.z;                          // dot({0,0,1}, dir)
-  if (d > 1.0 - 1e-9) return Quat{};               // already +Z
-  if (d < -1.0 + 1e-9) return Quat{0, 1, 0, 0};    // 180deg about X flips +Z to -Z
+  const double d = dir.z;                        // dot({0,0,1}, dir)
+  if (d > 1.0 - 1e-9) return Quat{};             // already +Z
+  if (d < -1.0 + 1e-9) return Quat{0, 1, 0, 0};  // 180deg about X flips +Z to -Z
   const Vec3 c = cross(Vec3{0, 0, 1}, dir);
   const Quat q{1.0 + d, c.x, c.y, c.z};
   const double n = std::sqrt(q.w * q.w + q.x * q.x + q.y * q.y + q.z * q.z);
@@ -195,7 +194,8 @@ ComponentGeometry parseComponentGeometry(const std::string& componentXml) {
 }
 
 std::optional<PartRef> parsePartRef(std::string_view ref) {
-  const auto dot = ref.find('.');  // "<component>.<part>"; names hold no '.', so first split is exact
+  const auto dot =
+      ref.find('.');  // "<component>.<part>"; names hold no '.', so first split is exact
   if (dot == std::string_view::npos || dot == 0 || dot + 1 >= ref.size()) return std::nullopt;
   return PartRef{std::string(ref.substr(0, dot)), std::string(ref.substr(dot + 1))};
 }
@@ -216,31 +216,32 @@ AABB moduleAabb(const std::string& componentXml) {
   if (!doc.load_string(componentXml.c_str())) return box;
 
   const pugi::xml_node comp = doc.child("components").child("component");
-  forEachComponentPart(comp, [&](const pugi::xml_node& part, const Transform& offset,
-                                 const std::string& tags) {
-    if (detail::hasToken(tags, "nocollision")) return;  // detail/anim/fx parts overstate their size box
-    const pugi::xml_node size = part.child("size");
-    if (!size) return;
-    const Vec3 half = readXyz(size.child("max"));
-    const Vec3 ctr = readXyz(size.child("center"));
-    for (int sx = -1; sx <= 1; sx += 2) {
-      for (int sy = -1; sy <= 1; sy += 2) {
-        for (int sz = -1; sz <= 1; sz += 2) {
-          const Vec3 corner{ctr.x + half.x * static_cast<double>(sx),
-                            ctr.y + half.y * static_cast<double>(sy),
-                            ctr.z + half.z * static_cast<double>(sz)};
-          const Vec3 world = apply(offset, corner);
-          if (!any) {
-            box.min = world;
-            box.max = world;
-            any = true;
-          } else {
-            expand(box, world);
+  forEachComponentPart(
+      comp, [&](const pugi::xml_node& part, const Transform& offset, const std::string& tags) {
+        if (detail::hasToken(tags, "nocollision"))
+          return;  // detail/anim/fx parts overstate their size box
+        const pugi::xml_node size = part.child("size");
+        if (!size) return;
+        const Vec3 half = readXyz(size.child("max"));
+        const Vec3 ctr = readXyz(size.child("center"));
+        for (int sx = -1; sx <= 1; sx += 2) {
+          for (int sy = -1; sy <= 1; sy += 2) {
+            for (int sz = -1; sz <= 1; sz += 2) {
+              const Vec3 corner{ctr.x + half.x * static_cast<double>(sx),
+                                ctr.y + half.y * static_cast<double>(sy),
+                                ctr.z + half.z * static_cast<double>(sz)};
+              const Vec3 world = apply(offset, corner);
+              if (!any) {
+                box.min = world;
+                box.max = world;
+                any = true;
+              } else {
+                expand(box, world);
+              }
+            }
           }
         }
-      }
-    }
-  });
+      });
   return box;
 }
 
@@ -270,7 +271,8 @@ MacroInfo parseMacro(const std::string& macroXml) {
 }
 
 std::string largestDockSize(const std::string& docksizeTags) {
-  static const std::array<const char*, 5> order{{"dock_xl", "dock_l", "dock_m", "dock_s", "dock_xs"}};
+  static const std::array<const char*, 5> order{
+      {"dock_xl", "dock_l", "dock_m", "dock_s", "dock_xs"}};
   for (const char* s : order)
     if (detail::hasToken(docksizeTags, s)) return s;
   return {};

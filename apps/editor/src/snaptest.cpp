@@ -2,16 +2,14 @@
 
 #include "app_paths.hpp"
 #include "mesh_cache.hpp"
+#include "raylib.h"
 #include "render.hpp"
-
 #include "x4sb/data/catalog.hpp"
 #include "x4sb/data/math.hpp"
 #include "x4sb/data/types.hpp"
 #include "x4sb/document/commands.hpp"
 #include "x4sb/document/station.hpp"
 #include "x4sb/snap/snap.hpp"
-
-#include "raylib.h"
 
 #include <algorithm>
 #include <array>
@@ -169,9 +167,7 @@ int runSnapTest(const std::string& outPrefix) {
         ::Vector3{900.0f, 700.0f, 900.0f},  // X4 units (~1.5 km out, 3/4 view)
         ::Vector3{static_cast<float>(midX4.x), static_cast<float>(midX4.y),
                   static_cast<float>(-midX4.z)},  // display-space target (flip Z)
-        ::Vector3{0.0f, 1.0f, 0.0f},
-        45.0f,
-        CAMERA_PERSPECTIVE};
+        ::Vector3{0.0f, 1.0f, 0.0f}, 45.0f, CAMERA_PERSPECTIVE};
 
     const std::string meshPath = outPrefix + "_mesh.png";
     const std::string boxPath = outPrefix + "_box.png";

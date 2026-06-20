@@ -92,8 +92,8 @@ TEST_CASE("Archive::sources() returns distinct prefixes in first-seen order") {
   fs::remove_all(dir);
   fs::create_directories(dir);
 
-  auto writePair = [&](const fs::path& catPath, const fs::path& datPath,
-                       const std::string& cat, const std::string& dat) {
+  auto writePair = [&](const fs::path& catPath, const fs::path& datPath, const std::string& cat,
+                       const std::string& dat) {
     std::ofstream(catPath, std::ios::binary) << cat;
     std::ofstream(datPath, std::ios::binary) << dat;
   };

@@ -48,7 +48,7 @@ TEST_CASE("extractClearanceVolumes: exclusionzone boxes use parameters.xml dims,
   CHECK(vols[0].center.z == doctest::Approx(51887));       // 1887 + 50000, outward of the marker
 
   // -X marker: outward is -X (via the quat), so the box centres further out at -X.
-  CHECK(vols[1].center.x == doctest::Approx(-51887));      // -1887 - 50000
+  CHECK(vols[1].center.x == doctest::Approx(-51887));  // -1887 - 50000
   CHECK(vols[1].halfExtents.z == doctest::Approx(50000));
 }
 
@@ -75,7 +75,8 @@ TEST_CASE("extractClearanceVolumes: M-class exclusionzone is short (500m), not 1
 // keep-clear markers. The exclusionzone is authoritative for the no-build box, so it
 // wins: the module emits one box per exclusionzone marker (ship_l = 1200 x 1200 x
 // 100000), and the launchpos->todock corridor is NOT emitted.
-TEST_CASE("extractClearanceVolumes: build module uses its exclusionzone boxes, not launch->todock") {
+TEST_CASE(
+    "extractClearanceVolumes: build module uses its exclusionzone boxes, not launch->todock") {
   const char* comp = R"(<?xml version="1.0"?>
 <components><component name="c" class="buildmodule">
   <connections>

@@ -236,8 +236,8 @@ std::unique_ptr<Command> makeSnapPlacement(const ModuleDef& newDef, Vec3 cursorW
 
   // Precondition: cand came from findSnapCandidate, so the target + both points
   // resolve; computeSnapTransform cannot hit its identity-on-miss fallback here.
-  const Transform xf = computeSnapTransform(station, catalog, cand->instanceId,
-                                            cand->targetPointId, newDef, cand->newPointId);
+  const Transform xf = computeSnapTransform(station, catalog, cand->instanceId, cand->targetPointId,
+                                            newDef, cand->newPointId);
   // NOTE: only the joint partner is excluded from the collision test. In a dense
   // station the new module's conservative world-AABB may overlap an already-placed
   // neighbour of the target and be rejected here. Acceptable for manual placement;
@@ -245,8 +245,9 @@ std::unique_ptr<Command> makeSnapPlacement(const ModuleDef& newDef, Vec3 cursorW
   // multi-id ignore set. TODO(snap): revisit when auto-layout lands.
   if (collidesWithStation(newDef, xf, cand->instanceId, station, catalog)) return nullptr;
 
-  return std::make_unique<PlaceModuleCommand>(newDef.id, xf, cand->instanceId, cand->newPointId,
-                                              cand->targetPointId);  // (..., newPointId, targetPointId)
+  return std::make_unique<PlaceModuleCommand>(
+      newDef.id, xf, cand->instanceId, cand->newPointId,
+      cand->targetPointId);  // (..., newPointId, targetPointId)
 }
 
 }  // namespace x4sb

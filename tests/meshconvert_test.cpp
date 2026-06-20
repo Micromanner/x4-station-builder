@@ -137,8 +137,8 @@ TEST_CASE("chooseMeshLod falls back to the fewest-vertex LOD when none fit") {
   // None fit the budget: pick the smallest (it will still box, but best effort).
   CHECK(chooseMeshLod(A{900000u, 800000u, 700000u, 70000u}, 65535) == 3);
   // Nothing shipped at all -> no choice.
-  CHECK_FALSE(chooseMeshLod(A{std::nullopt, std::nullopt, std::nullopt, std::nullopt}, 65535)
-                  .has_value());
+  CHECK_FALSE(
+      chooseMeshLod(A{std::nullopt, std::nullopt, std::nullopt, std::nullopt}, 65535).has_value());
 }
 
 TEST_CASE("convertModuleMeshes writes exactly the paths buildModuleCatalog records") {

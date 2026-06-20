@@ -1,5 +1,5 @@
-#include "x4sb/document/station.hpp"
 #include "x4sb/document/commands.hpp"
+#include "x4sb/document/station.hpp"
 
 #include <doctest/doctest.h>
 
@@ -311,15 +311,15 @@ TEST_CASE("SnapMoveCommand: detaches a prior link, undo restores both ends") {
 
   SnapMoveCommand cmd(idb, Transform{}, ida, "b1", "a1");
   cmd.apply(s);
-  CHECK(s.find(idc)->links.empty());          // b<->c stripped
-  REQUIRE(s.find(idb)->links.size() == 1);    // only the new b<->a link
+  CHECK(s.find(idc)->links.empty());        // b<->c stripped
+  REQUIRE(s.find(idb)->links.size() == 1);  // only the new b<->a link
   CHECK(s.find(idb)->links[0].otherInstanceId == ida);
 
   cmd.undo(s);
   REQUIRE(s.find(idb)->links.size() == 1);
   CHECK(s.find(idb)->links[0].otherInstanceId == idc);  // b<->c restored
   CHECK(s.find(idc)->links.size() == 1);
-  CHECK(s.find(ida)->links.empty());                    // new link removed
+  CHECK(s.find(ida)->links.empty());  // new link removed
 }
 
 TEST_CASE("SnapMoveCommand: former neighbor IS the target — undo ordering restores cleanly") {
