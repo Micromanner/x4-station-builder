@@ -327,18 +327,19 @@ TEST_CASE("CompositeCommand applies in order and undoes in reverse, preserving l
   std::vector<std::unique_ptr<Command>> cmds;
   cmds.push_back(std::make_unique<PlaceModuleCommand>("root", Transform{}));
   // The root is the first add → it gets instance id 1; the child snaps onto it.
-  cmds.push_back(std::make_unique<PlaceModuleCommand>("child", Transform{}, InstanceId{1}, "c1", "r1"));
+  cmds.push_back(
+      std::make_unique<PlaceModuleCommand>("child", Transform{}, InstanceId{1}, "c1", "r1"));
   CompositeCommand comp(std::move(cmds));
 
   comp.apply(s);
   CHECK(s.size() == 2);
   const PlacedModule* root = s.find(1);
   REQUIRE(root != nullptr);
-  REQUIRE(root->links.size() == 1);           // gained the reciprocal from the child
+  REQUIRE(root->links.size() == 1);  // gained the reciprocal from the child
   CHECK(root->links[0].otherInstanceId == 2);
 
   comp.undo(s);
-  CHECK(s.empty());                            // both removed, reciprocal stripped
+  CHECK(s.empty());  // both removed, reciprocal stripped
 }
 
 TEST_CASE("SnapMoveCommand: former neighbor IS the target — undo ordering restores cleanly") {

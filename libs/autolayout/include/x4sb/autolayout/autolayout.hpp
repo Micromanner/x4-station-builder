@@ -35,10 +35,10 @@ struct LayoutPlacement {
   std::string defId;
   Transform worldTransform{};
   bool snapped = false;
-  InstanceId targetInstanceId = 0;        // valid iff snapped
-  std::string newPointId;                 // valid iff snapped
-  std::string targetPointId;              // valid iff snapped
-  InstanceId instanceId = 0;              // id assigned during the simulation
+  InstanceId targetInstanceId = 0;  // valid iff snapped
+  std::string newPointId;           // valid iff snapped
+  std::string targetPointId;        // valid iff snapped
+  InstanceId instanceId = 0;        // id assigned during the simulation
 };
 
 struct AutoLayoutResult {

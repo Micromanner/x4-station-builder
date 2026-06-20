@@ -626,26 +626,27 @@ TEST_CASE("showAllClearance is render-only state: defaults off, round-trips") {
 }
 
 TEST_CASE("cart accumulates from the palette and runAutoLayout builds with single-undo") {
-  const ModuleCatalog c = twoModuleCatalog();  // a_mod (Production, conn a1), b_mod (Storage, conn b1)
+  const ModuleCatalog c =
+      twoModuleCatalog();  // a_mod (Production, conn a1), b_mod (Storage, conn b1)
   EditorState s(c);
 
   REQUIRE(s.activeDef() != nullptr);
   CHECK(s.activeDef()->id == "a_mod");
   s.cartAdd();
-  s.cartAdd();                 // 2x a_mod
-  s.cycleActive(1);            // -> b_mod
-  s.cartAdd();                 // +1 b_mod
+  s.cartAdd();       // 2x a_mod
+  s.cycleActive(1);  // -> b_mod
+  s.cartAdd();       // +1 b_mod
   CHECK(s.cartTotal() == 3);
-  s.cartRemove();              // remove the b_mod
+  s.cartRemove();  // remove the b_mod
   CHECK(s.cartTotal() == 2);
   CHECK(s.cart().count("b_mod") == 0u);
 
   const AutoLayoutReport rep = s.runAutoLayout();
   CHECK(rep.requested == 2);
   CHECK(s.station().size() == 2);
-  CHECK(s.cart().empty());     // cleared after the run
+  CHECK(s.cart().empty());  // cleared after the run
   REQUIRE(s.canUndo());
-  s.undo();                    // ONE undo reverts the whole layout
+  s.undo();  // ONE undo reverts the whole layout
   CHECK(s.station().empty());
 }
 
@@ -653,7 +654,7 @@ TEST_CASE("cartSummary is deterministic and human-readable") {
   const ModuleCatalog c = twoModuleCatalog();
   EditorState s(c);
   CHECK(s.cartSummary() == "cart: empty");
-  s.cartAdd();                 // a_mod x1
+  s.cartAdd();  // a_mod x1
   const std::string sum = s.cartSummary();
   CHECK(sum.find("a_mod") != std::string::npos);
   CHECK(sum.find("x1") != std::string::npos);

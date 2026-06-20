@@ -58,8 +58,9 @@ bool noNonAdjacentOverlap(const Station& s, const ModuleCatalog& c) {
     const AABB am = worldAabb(dm->aabb, m.worldTransform);
     for (const auto& o : s.modules()) {
       if (o.instanceId == m.instanceId) continue;
-      const bool linked = std::any_of(m.links.begin(), m.links.end(),
-                                      [&](const Link& l) { return l.otherInstanceId == o.instanceId; });
+      const bool linked = std::any_of(m.links.begin(), m.links.end(), [&](const Link& l) {
+        return l.otherInstanceId == o.instanceId;
+      });
       if (linked) continue;
       const ModuleDef* doo = c.find(o.defId);
       if (doo == nullptr) continue;
@@ -85,8 +86,8 @@ TEST_CASE("orderedPlacement: category priority, then largest-first, then id; ski
   c.add(nb);
 
   const OrderedCart oc = orderedPlacement(
-      QuantityList{{"dock1", 1}, {"prod_small", 1}, {"prod_big", 1}, {"conn1", 1},
-                   {"nb", 2}, {"ghost", 3}},
+      QuantityList{
+          {"dock1", 1}, {"prod_small", 1}, {"prod_big", 1}, {"conn1", 1}, {"nb", 2}, {"ghost", 3}},
       c);
 
   CHECK(oc.requested == 9);  // 1+1+1+1+2+3
@@ -130,8 +131,8 @@ TEST_CASE("autoLayout floats a module that cannot legally snap") {
   const AutoLayoutResult r = autoLayout(empty, QuantityList{{"a", 1}, {"b", 1}}, c);
 
   CHECK(r.report.requested == 2);
-  CHECK(r.report.snapped == 0);     // b can't mate a
-  CHECK(r.report.floating == 2);    // a (seed) + b (overflow)
+  CHECK(r.report.snapped == 0);   // b can't mate a
+  CHECK(r.report.floating == 2);  // a (seed) + b (overflow)
   CHECK(r.station.size() == 2);
   CHECK(noNonAdjacentOverlap(r.station, c));
 }
@@ -170,8 +171,8 @@ TEST_CASE("autoLayout skips unknown / non-buildable defs but places the rest") {
       autoLayout(empty, QuantityList{{"hub", 1}, {"ghost", 2}, {"nb", 1}}, c);
 
   CHECK(r.report.requested == 4);
-  CHECK(r.report.skipped == 3);    // 2 unknown + 1 non-buildable
-  CHECK(r.station.size() == 1);    // only the hub
+  CHECK(r.report.skipped == 3);  // 2 unknown + 1 non-buildable
+  CHECK(r.station.size() == 1);  // only the hub
   CHECK(std::find(r.report.skippedDefs.begin(), r.report.skippedDefs.end(), "ghost") !=
         r.report.skippedDefs.end());
 }
