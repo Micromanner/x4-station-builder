@@ -14,13 +14,23 @@ const ::Font& fontFor(const UiFonts& fonts, std::uint16_t id) {
   return id == static_cast<std::uint16_t>(FontId::Value) ? fonts.value : fonts.display;
 }
 
+// Null-terminate a Clay text slice for raylib's c-string text APIs. The slice
+// points into a longer backing buffer, so we must copy exactly `length` bytes; one
+// reused buffer keeps it warm across the per-frame measure/render calls instead of
+// heap-allocating each time. Single UI thread, result consumed before the next call.
+const char* sliceCStr(const char* chars, std::int32_t length) {
+  static std::string scratch;
+  scratch.assign(chars, static_cast<std::size_t>(length));
+  return scratch.c_str();
+}
+
 // Clay measures text through this; userData is the UiFonts* registered in clayInit.
 Clay_Dimensions measureText(Clay_StringSlice text, Clay_TextElementConfig* config, void* userData) {
   const auto* fonts = static_cast<const UiFonts*>(userData);
   const ::Font& font = fontFor(*fonts, config->fontId);
-  const std::string s(text.chars, static_cast<std::size_t>(text.length));
-  const ::Vector2 m = MeasureTextEx(font, s.c_str(), static_cast<float>(config->fontSize),
-                                    static_cast<float>(config->letterSpacing));
+  const ::Vector2 m =
+      MeasureTextEx(font, sliceCStr(text.chars, text.length), static_cast<float>(config->fontSize),
+                    static_cast<float>(config->letterSpacing));
   return Clay_Dimensions{m.x, m.y};
 }
 
@@ -91,9 +101,8 @@ void renderClayCommands(const Clay_RenderCommandArray& commands, const UiFonts& 
       }
       case CLAY_RENDER_COMMAND_TYPE_TEXT: {
         const Clay_TextRenderData& t = cmd->renderData.text;
-        const std::string s(t.stringContents.chars,
-                            static_cast<std::size_t>(t.stringContents.length));
-        DrawTextEx(fontFor(fonts, t.fontId), s.c_str(), ::Vector2{r.x, r.y},
+        DrawTextEx(fontFor(fonts, t.fontId),
+                   sliceCStr(t.stringContents.chars, t.stringContents.length), ::Vector2{r.x, r.y},
                    static_cast<float>(t.fontSize), static_cast<float>(t.letterSpacing),
                    toRlColor(t.textColor));
         break;

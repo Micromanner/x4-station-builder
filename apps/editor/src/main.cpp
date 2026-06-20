@@ -34,6 +34,7 @@
 #include <filesystem>
 #include <optional>
 #include <string>
+#include <utility>
 #include <vector>
 
 namespace {
@@ -165,6 +166,11 @@ int main(int argc, char** argv) {
         false;  // editor default: show every module as a mesh (L toggles distance-LOD)
     std::string toast;
     double toastUntil = 0.0;
+    constexpr double kToastSeconds = 4.0;
+    const auto setToast = [&](std::string message) {
+      toast = std::move(message);
+      toastUntil = GetTime() + kToastSeconds;
+    };
 
     while (!WindowShouldClose()) {
       {
@@ -191,10 +197,7 @@ int main(int argc, char** argv) {
           cam.frame(c, r);
         }
         const x4sb::editor::PlanIoOutcome io = x4sb::editor::handlePlanIoKeys(state);
-        if (io.message) {
-          toast = *io.message;
-          toastUntil = GetTime() + 4.0;
-        }
+        if (io.message) setToast(*io.message);
         if (io.reloaded) {
           // Editor model: upload the whole plan's meshes up front (loading screen)
           // rather than streaming the in-view set, so there's no box pop-in and
@@ -204,9 +207,8 @@ int main(int argc, char** argv) {
 
         if (IsKeyPressed(KEY_ENTER)) {
           const x4sb::AutoLayoutReport rep = state.runAutoLayout();
-          toast = "auto-layout: snapped " + std::to_string(rep.snapped) + ", floating " +
-                  std::to_string(rep.floating) + ", skipped " + std::to_string(rep.skipped);
-          toastUntil = GetTime() + 4.0;
+          setToast("auto-layout: snapped " + std::to_string(rep.snapped) + ", floating " +
+                   std::to_string(rep.floating) + ", skipped " + std::to_string(rep.skipped));
           // New modules need their meshes resident (mirror the plan-load warm path).
           x4sb::editor::loadStationMeshes(state.station(), state.catalog(), meshes);
         }
@@ -240,13 +242,11 @@ int main(int argc, char** argv) {
 
       switch (action) {
         case x4sb::editor::TopBarAction::Save:
-          toast = x4sb::editor::savePlan(state);
-          toastUntil = GetTime() + 4.0;
+          setToast(x4sb::editor::savePlan(state));
           break;
         case x4sb::editor::TopBarAction::Open: {
           bool loaded = false;
-          toast = x4sb::editor::loadPlan(state, loaded);
-          toastUntil = GetTime() + 4.0;
+          setToast(x4sb::editor::loadPlan(state, loaded));
           if (loaded) x4sb::editor::loadStationMeshes(state.station(), state.catalog(), meshes);
           break;
         }
