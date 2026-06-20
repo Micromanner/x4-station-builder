@@ -932,7 +932,7 @@ void drawHud(const EditorState& state, int screenWidth, int /*screenHeight*/, bo
                   def != nullptr ? displayName(*def).c_str() : "(none)");
     DrawText(line, 12, 10, 20, RAYWHITE);
   } else {
-    DrawText("SELECT  (Q to build)  -  click a placed module to select it", 12, 10, 20, GOLD);
+    DrawText("SELECT  (Tab to build)  -  click a placed module to select it", 12, 10, 20, GOLD);
   }
 
   const char* filt = state.filter().has_value() ? categoryName(*state.filter()) : "All";
@@ -951,10 +951,12 @@ void drawHud(const EditorState& state, int screenWidth, int /*screenHeight*/, bo
       "[ / ]=cycle  1=Prod 2=Stor 3=Hab 4=Dock 5=Def 6=Conn 7=Other  0=all  G=gizmos  M=mesh/box",
       12, 78, 14, GRAY);
   DrawText(
-      "LMB=place/select/drag-gizmo   Q=build/select   T/Y=move/rotate gizmo   "
-      "R/Shift+R/Ctrl+R=rotate   O=overlap   C=corridors   Alt=free   Del/X=delete   "
-      "Ctrl+Z/Y=undo/redo   RMB=orbit   wheel=zoom   F=frame",
+      "LMB=place/select/drag-gizmo   Tab=build/select   T/Y=move/rotate gizmo   "
+      "R/Shift+R/Ctrl+R=rotate   O=overlap   C=corridors   Alt=free   Del=delete   "
+      "Ctrl+Z/Y=undo/redo",
       12, 96, 14, GRAY);
+  DrawText("WASD=fly  Q/E=turn  Z/X=up/down  RMB=orbit  MMB=pan  wheel=zoom  F=frame", 12, 114, 14,
+           GRAY);
 
   DrawFPS(screenWidth - 90, 10);
 }

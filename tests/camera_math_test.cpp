@@ -59,6 +59,47 @@ TEST_CASE("flyOffset moves along look/right/world-up and normalizes diagonals") 
   CHECK(std::abs(length(flyOffset(b, up, 1.0, 1.0, 0.0, 10.0)) - 10.0) < 1e-9);
 }
 
+TEST_CASE("resolveFlyInput maps WASD fly + ZX rise + QE yaw to net inputs") {
+  // forward = W - S
+  CHECK(resolveFlyInput(true, false, false, false, false, false, false, false, false).forward ==
+        doctest::Approx(1.0));
+  CHECK(resolveFlyInput(false, true, false, false, false, false, false, false, false).forward ==
+        doctest::Approx(-1.0));
+  // strafe keeps the existing A=+right(screen-left)/D=-right convention (A - D).
+  CHECK(resolveFlyInput(false, false, true, false, false, false, false, false, false).strafe ==
+        doctest::Approx(1.0));
+  CHECK(resolveFlyInput(false, false, false, true, false, false, false, false, false).strafe ==
+        doctest::Approx(-1.0));
+  // rise now comes from Z (up) / X (down) — the §3.5 remap off the old E/C pair.
+  CHECK(resolveFlyInput(false, false, false, false, true, false, false, false, false).rise ==
+        doctest::Approx(1.0));
+  CHECK(resolveFlyInput(false, false, false, false, false, true, false, false, false).rise ==
+        doctest::Approx(-1.0));
+  // yaw from Q (left, +1) / E (right, -1).
+  CHECK(resolveFlyInput(false, false, false, false, false, false, true, false, false).yaw ==
+        doctest::Approx(1.0));
+  CHECK(resolveFlyInput(false, false, false, false, false, false, false, true, false).yaw ==
+        doctest::Approx(-1.0));
+}
+
+TEST_CASE("resolveFlyInput zeroes every fly/yaw input while Ctrl is held (known-issues 3.10)") {
+  // Every fly/yaw key down but Ctrl held => no camera motion, so Ctrl+S / Ctrl+O /
+  // Ctrl+Z chords can't drift or turn the view.
+  const FlyInput f = resolveFlyInput(true, true, true, true, true, true, true, true, /*ctrl=*/true);
+  CHECK(f.forward == doctest::Approx(0.0));
+  CHECK(f.strafe == doctest::Approx(0.0));
+  CHECK(f.rise == doctest::Approx(0.0));
+  CHECK(f.yaw == doctest::Approx(0.0));
+}
+
+TEST_CASE("resolveFlyInput cancels opposite keys to zero") {
+  const FlyInput f = resolveFlyInput(true, true, true, true, true, true, true, true, false);
+  CHECK(f.forward == doctest::Approx(0.0));
+  CHECK(f.strafe == doctest::Approx(0.0));
+  CHECK(f.rise == doctest::Approx(0.0));
+  CHECK(f.yaw == doctest::Approx(0.0));
+}
+
 TEST_CASE("zoomTowardCursor keeps the focal point fixed and clamps distance") {
   // Camera at origin looking down -Z, pivot 100 ahead. Cursor ray hits the pivot
   // plane (z=-100) at x=10 (a ray angled in +X).

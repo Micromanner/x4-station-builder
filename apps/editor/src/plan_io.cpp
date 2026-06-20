@@ -1,5 +1,7 @@
 #include "plan_io.hpp"
 
+#include "modifier_keys.hpp"
+
 #include "x4sb/planio/plan.hpp"
 #include "x4sb/platform/platform.hpp"
 
@@ -78,8 +80,7 @@ std::string loadFromDisk(EditorState& state, bool& didLoad) {
 }  // namespace
 
 PlanIoOutcome handlePlanIoKeys(EditorState& state) {
-  const bool ctrl = IsKeyDown(KEY_LEFT_CONTROL) || IsKeyDown(KEY_RIGHT_CONTROL);
-  if (!ctrl) return {};
+  if (!isCtrlDown()) return {};
   if (IsKeyPressed(KEY_S)) return {saveToDisk(state), false};
   if (IsKeyPressed(KEY_O)) {
     bool loaded = false;

@@ -160,9 +160,9 @@ int main(int argc, char** argv) {
           zoomFocus = x4sb::editor::zoomFocusUnderCursor(state, cam.camera());
         cam.update(zoomFocus);
         x4sb::editor::handleKeys(state);
-        // Re-baseline the free-place standoff when Q enters build mode, so a fresh
+        // Re-baseline the free-place standoff when Tab enters build mode, so a fresh
         // ghost sits at the current view depth (handleKeys already toggled the mode).
-        if (IsKeyPressed(KEY_Q) && state.placementEnabled())
+        if (IsKeyPressed(KEY_TAB) && state.placementEnabled())
           state.setPlaceDistance(cam.distance());
         if (IsKeyPressed(KEY_G)) showGizmos = !showGizmos;
         if (IsKeyPressed(KEY_M)) showMeshes = !showMeshes;

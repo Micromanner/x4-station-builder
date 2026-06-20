@@ -48,7 +48,7 @@ struct CameraBasis {
 
 // WASD-style bulk fly: world-space offset to translate the whole rig (both pivot
 // and eye, so look direction and orbit distance are preserved) for one frame.
-// `forward`/`strafe`/`rise` are the net key inputs in {-1,0,1} (W-S, D-A, E-C);
+// `forward`/`strafe`/`rise` are the net key inputs in {-1,0,1} (W-S, A-D, Z-X);
 // forward follows the look direction (basis.forward), rise is along world up.
 // The direction is normalized so diagonals aren't faster, and zero input yields
 // zero motion. `speed` is world units this frame (caller scales by distance + dt).
@@ -56,6 +56,24 @@ struct CameraBasis {
                                     double strafe, double rise, double speed) {
   const Vec3 dir = b.forward * forward + b.right * strafe + normalized(worldUp) * rise;
   return normalized(dir) * speed;
+}
+
+// Net camera fly + yaw inputs resolved from the keyboard, each in {-1, 0, 1}.
+struct FlyInput {
+  double forward;  // W - S (along the look direction)
+  double strafe;   // A - D (basis.right; A points screen-left under the LH basis)
+  double rise;     // Z - X (world up; Z=up, X=down)
+  double yaw;      // Q - E (turn left / right)
+};
+
+// Resolve the WASD fly / ZX rise / QE yaw keys into net inputs. Holding Ctrl yields
+// zero motion (known-issues 3.10): the camera must ignore every fly/yaw key while a
+// Ctrl chord is active so Ctrl+S / Ctrl+O / Ctrl+Z don't also drift or turn the view.
+[[nodiscard]] inline FlyInput resolveFlyInput(bool w, bool s, bool a, bool d, bool z, bool x,
+                                              bool q, bool e, bool ctrl) {
+  if (ctrl) return {0.0, 0.0, 0.0, 0.0};
+  const auto net = [](bool pos, bool neg) { return (pos ? 1.0 : 0.0) - (neg ? 1.0 : 0.0); };
+  return {net(w, s), net(a, d), net(z, x), net(q, e)};
 }
 
 struct ZoomResult {

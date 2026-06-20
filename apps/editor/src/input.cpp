@@ -1,5 +1,6 @@
 #include "input.hpp"
 
+#include "modifier_keys.hpp"
 #include "raylib_convert.hpp"  // toRl
 
 #include "x4sb/editorcore/display_flip.hpp"
@@ -54,9 +55,10 @@ void handleKeys(EditorState& state) {
   }
   if (IsKeyPressed(KEY_ZERO)) state.setFilter(std::nullopt);
 
-  if (IsKeyPressed(KEY_DELETE) || IsKeyPressed(KEY_X)) state.deleteSelected();
+  // Delete on Del only — X is now a camera key (down/elevation), see orbit_camera.
+  if (IsKeyPressed(KEY_DELETE)) state.deleteSelected();
 
-  const bool ctrl = IsKeyDown(KEY_LEFT_CONTROL) || IsKeyDown(KEY_RIGHT_CONTROL);
+  const bool ctrl = isCtrlDown();
   if (ctrl && IsKeyPressed(KEY_Z)) state.undo();
   if (ctrl && IsKeyPressed(KEY_Y)) state.redo();
 
@@ -65,9 +67,9 @@ void handleKeys(EditorState& state) {
   // otherwise the placement ghost's pending rotation accumulates.
   if (IsKeyPressed(KEY_R)) {
     Vec3 axis{0, 1, 0};
-    if (IsKeyDown(KEY_LEFT_SHIFT) || IsKeyDown(KEY_RIGHT_SHIFT)) {
+    if (isShiftDown()) {
       axis = {1, 0, 0};
-    } else if (IsKeyDown(KEY_LEFT_CONTROL) || IsKeyDown(KEY_RIGHT_CONTROL)) {
+    } else if (isCtrlDown()) {
       axis = {0, 0, 1};
     }
     if (state.selected()) {
@@ -77,17 +79,17 @@ void handleKeys(EditorState& state) {
     }
   }
 
-  // Q holsters the active module (toggle build <-> select mode). In select mode
+  // Tab holsters the active module (toggle build <-> select mode). In select mode
   // there is no ghost, so a left-click selects a module you already built — then
-  // press Q again to keep building onto it.
-  if (IsKeyPressed(KEY_Q)) state.togglePlacement();
+  // press Tab again to keep building onto it. (Q is now a camera-yaw key.)
+  if (IsKeyPressed(KEY_TAB)) state.togglePlacement();
 
-  // O toggles Allow Module Overlap (bypass collision/clearance checks, mirroring
-  // X4's editor setting). O is free; Q/E/X/R/Z/WASD are taken.
-  if (IsKeyPressed(KEY_O)) state.setAllowOverlap(!state.allowOverlap());
+  // O toggles Allow Module Overlap (bypass body-overlap checks, mirroring X4's
+  // editor setting). Guarded against Ctrl so Ctrl+O (load plan) doesn't also flip it.
+  if (!ctrl && IsKeyPressed(KEY_O)) state.setAllowOverlap(!state.allowOverlap());
 
   // C toggles "show all flight corridors" (every dock's clearance volume, not just
-  // the selected/ghost module's). C is free.
+  // the selected/ghost module's). Unambiguous now that the camera vacated C (Z/X).
   if (IsKeyPressed(KEY_C)) state.setShowAllClearance(!state.showAllClearance());
 
   // Gizmo mode: T = Translate (arrows/planes), Y = Rotate (rings). Guarded against
@@ -119,8 +121,8 @@ double gizmoScaleFor(const ::Camera3D& camera, const EditorState& state) {
 }
 
 void handleMouse(EditorState& state, const ::Camera3D& camera) {
-  const bool alt = IsKeyDown(KEY_LEFT_ALT) || IsKeyDown(KEY_RIGHT_ALT);
-  const bool shift = IsKeyDown(KEY_LEFT_SHIFT) || IsKeyDown(KEY_RIGHT_SHIFT);
+  const bool alt = isAltDown();
+  const bool shift = isShiftDown();
   Vec3 ro{};
   Vec3 rd{};
   mouseRayX4(camera, ro, rd);
