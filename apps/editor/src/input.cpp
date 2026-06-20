@@ -39,6 +39,12 @@ void handleKeys(EditorState& state) {
   if (IsKeyPressed(KEY_LEFT_BRACKET)) state.cycleActive(-1);
   if (IsKeyPressed(KEY_RIGHT_BRACKET)) state.cycleActive(1);
 
+  // Auto-layout cart: +/- add/remove the active module, Backspace clears. (Run is
+  // Enter, handled in main.cpp where the toast lives.) Letter keys are camera-reserved.
+  if (IsKeyPressed(KEY_EQUAL)) state.cartAdd();
+  if (IsKeyPressed(KEY_MINUS)) state.cartRemove();
+  if (IsKeyPressed(KEY_BACKSPACE)) state.cartClear();
+
   // Category filter on number keys 1-N (KEY_ONE.. are contiguous), one per
   // Category in declaration order. Bound derived from the array so adding a
   // Category can't desync a hard-coded count.

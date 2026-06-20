@@ -1,5 +1,6 @@
 #include "x4sb/editorcore/editor_state.hpp"
 
+#include "x4sb/autolayout/autolayout.hpp"
 #include "x4sb/document/commands.hpp"
 #include "x4sb/snap/pick.hpp"
 #include "x4sb/snap/snap.hpp"
@@ -7,6 +8,8 @@
 #include <algorithm>
 #include <cmath>
 #include <memory>
+#include <string>
+#include <vector>
 
 namespace x4sb {
 namespace {
@@ -389,6 +392,57 @@ void EditorState::updateGizmoHover(Vec3 rayOriginX4, Vec3 rayDirX4, double gizmo
 std::optional<GizmoHandle> EditorState::highlightHandle() const {
   if (drag_) return drag_->handle;
   return hoveredHandle_;
+}
+
+void EditorState::cartAdd() {
+  if (const ModuleDef* d = activeDef()) ++cart_[d->id];
+}
+
+void EditorState::cartRemove() {
+  const ModuleDef* d = activeDef();
+  if (d == nullptr) return;
+  const auto it = cart_.find(d->id);
+  if (it == cart_.end()) return;
+  if (--it->second <= 0) cart_.erase(it);
+}
+
+int EditorState::cartTotal() const {
+  int n = 0;
+  for (const auto& [id, count] : cart_) n += count;
+  return n;
+}
+
+std::string EditorState::cartSummary() const {
+  if (cart_.empty()) return "cart: empty";
+  std::vector<std::string> ids;
+  ids.reserve(cart_.size());
+  for (const auto& [id, count] : cart_) ids.push_back(id);
+  std::sort(ids.begin(), ids.end());  // deterministic order (cart_ is unordered)
+  std::string out = "cart:";
+  for (const auto& id : ids) {
+    const ModuleDef* d = catalog_.find(id);
+    const std::string label = d != nullptr ? displayName(*d) : id;
+    out += " " + label + " x" + std::to_string(cart_.at(id));
+  }
+  out += " (" + std::to_string(ids.size()) + " types, " + std::to_string(cartTotal()) + ")";
+  return out;
+}
+
+AutoLayoutReport EditorState::runAutoLayout() {
+  const AutoLayoutResult r = autoLayout(station_, cart_, catalog_);
+  std::vector<std::unique_ptr<Command>> cmds;
+  cmds.reserve(r.placements.size());
+  for (const LayoutPlacement& p : r.placements) {
+    if (p.snapped)
+      cmds.push_back(std::make_unique<PlaceModuleCommand>(p.defId, p.worldTransform,
+                                                          p.targetInstanceId, p.newPointId,
+                                                          p.targetPointId));
+    else
+      cmds.push_back(std::make_unique<PlaceModuleCommand>(p.defId, p.worldTransform));
+  }
+  if (!cmds.empty()) execute(std::make_unique<CompositeCommand>(std::move(cmds)));
+  cart_.clear();
+  return r.report;
 }
 
 }  // namespace x4sb

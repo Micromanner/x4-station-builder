@@ -185,6 +185,15 @@ int main(int argc, char** argv) {
           x4sb::editor::loadStationMeshes(state.station(), state.catalog(), meshes);
         }
 
+        if (IsKeyPressed(KEY_ENTER)) {
+          const x4sb::AutoLayoutReport rep = state.runAutoLayout();
+          toast = "auto-layout: snapped " + std::to_string(rep.snapped) + ", floating " +
+                  std::to_string(rep.floating) + ", skipped " + std::to_string(rep.skipped);
+          toastUntil = GetTime() + 4.0;
+          // New modules need their meshes resident (mirror the plan-load warm path).
+          x4sb::editor::loadStationMeshes(state.station(), state.catalog(), meshes);
+        }
+
         x4sb::editor::handleMouse(state, cam.camera());
       }
 

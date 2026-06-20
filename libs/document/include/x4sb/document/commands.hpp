@@ -4,6 +4,7 @@
 // on the other module). Pure data/logic; no rendering.
 #include "x4sb/document/station.hpp"
 
+#include <memory>
 #include <string>
 #include <utility>
 #include <vector>
@@ -84,6 +85,20 @@ class SnapMoveCommand : public Command {
   bool captured_{false};
   std::vector<Link> removedOwnLinks_;
   std::vector<std::pair<InstanceId, Link>> strippedNeighborLinks_;
+};
+
+// Apply several sub-commands as one reversible step — auto-layout commits its whole
+// batch so a single undo reverts it. apply() runs them in order; undo() in reverse, so
+// reciprocal links a later command added on a target are stripped before the target is
+// removed.
+class CompositeCommand : public Command {
+ public:
+  explicit CompositeCommand(std::vector<std::unique_ptr<Command>> cmds);
+  void apply(Station& s) override;
+  void undo(Station& s) override;
+
+ private:
+  std::vector<std::unique_ptr<Command>> cmds_;
 };
 
 }  // namespace x4sb

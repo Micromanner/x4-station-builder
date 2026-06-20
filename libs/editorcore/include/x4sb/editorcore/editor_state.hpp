@@ -4,6 +4,7 @@
 // the current selection, and the per-frame ghost preview. The raylib shell in
 // apps/editor only converts input into X4-space rays/keys and draws this state,
 // so the entire interaction is unit-testable under the `core` preset.
+#include "x4sb/autolayout/autolayout.hpp"
 #include "x4sb/data/catalog.hpp"
 #include "x4sb/data/math.hpp"
 #include "x4sb/data/types.hpp"
@@ -106,6 +107,18 @@ class EditorState {
   // selection, and ghost reset.
   void loadStation(Station station);
 
+  // ── Auto-layout cart (parent §7) ──────────────────────────────────────────
+  // A quantity list built from the palette: cartAdd/cartRemove act on the active
+  // module; runAutoLayout commits the whole layout as ONE undoable step and clears
+  // the cart. The polished quantity editor is a later (step-6 / Clay) concern.
+  void cartAdd();
+  void cartRemove();
+  void cartClear() { cart_.clear(); }
+  [[nodiscard]] const QuantityList& cart() const { return cart_; }
+  [[nodiscard]] int cartTotal() const;
+  [[nodiscard]] std::string cartSummary() const;
+  AutoLayoutReport runAutoLayout();
+
   // ── Selection / deletion ────────────────────────────────────────────────
   // Pick the nearest module along the X4-space ray; sets (or clears on a miss)
   // the selection. Returns the selected id, if any.
@@ -176,6 +189,7 @@ class EditorState {
 
   const ModuleCatalog& catalog_;
   Station station_;
+  QuantityList cart_;  // auto-layout cart (macro id -> count)
   UndoStack undo_;
   std::vector<std::string> order_;  // player-buildable module ids, sorted (stable cursor)
   std::optional<Category> filter_;

@@ -322,6 +322,25 @@ TEST_CASE("SnapMoveCommand: detaches a prior link, undo restores both ends") {
   CHECK(s.find(ida)->links.empty());  // new link removed
 }
 
+TEST_CASE("CompositeCommand applies in order and undoes in reverse, preserving links") {
+  Station s;
+  std::vector<std::unique_ptr<Command>> cmds;
+  cmds.push_back(std::make_unique<PlaceModuleCommand>("root", Transform{}));
+  // The root is the first add → it gets instance id 1; the child snaps onto it.
+  cmds.push_back(std::make_unique<PlaceModuleCommand>("child", Transform{}, InstanceId{1}, "c1", "r1"));
+  CompositeCommand comp(std::move(cmds));
+
+  comp.apply(s);
+  CHECK(s.size() == 2);
+  const PlacedModule* root = s.find(1);
+  REQUIRE(root != nullptr);
+  REQUIRE(root->links.size() == 1);           // gained the reciprocal from the child
+  CHECK(root->links[0].otherInstanceId == 2);
+
+  comp.undo(s);
+  CHECK(s.empty());                            // both removed, reciprocal stripped
+}
+
 TEST_CASE("SnapMoveCommand: former neighbor IS the target — undo ordering restores cleanly") {
   // b is already linked to a on points b2<->a2; snap-moving b onto a via fresh
   // points b1<->a1 detaches the old joint and forms the new one. This exercises

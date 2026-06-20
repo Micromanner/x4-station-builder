@@ -178,4 +178,15 @@ void SnapMoveCommand::undo(Station& s) {
   }
 }
 
+CompositeCommand::CompositeCommand(std::vector<std::unique_ptr<Command>> cmds)
+    : cmds_(std::move(cmds)) {}
+
+void CompositeCommand::apply(Station& s) {
+  for (auto& c : cmds_) c->apply(s);
+}
+
+void CompositeCommand::undo(Station& s) {
+  for (auto it = cmds_.rbegin(); it != cmds_.rend(); ++it) (*it)->undo(s);
+}
+
 }  // namespace x4sb

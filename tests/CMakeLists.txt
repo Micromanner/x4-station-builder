@@ -24,7 +24,8 @@ add_executable(x4sb_tests
   localization_test.cpp
   catalogbuild_test.cpp
   meshconvert_test.cpp
-  camera_math_test.cpp)
+  camera_math_test.cpp
+  autolayout_test.cpp)
 
 target_link_libraries(x4sb_tests PRIVATE
   doctest::doctest

@@ -947,15 +947,17 @@ void drawHud(const EditorState& state, int screenWidth, int /*screenHeight*/, bo
                 state.showAllClearance() ? "ON" : "off");
   DrawText(line, 12, 56, 16, LIGHTGRAY);
 
+  DrawText(state.cartSummary().c_str(), 12, 76, 16, ::Color{200, 220, 255, 255});
+
   DrawText(
       "[ / ]=cycle  1=Prod 2=Stor 3=Hab 4=Dock 5=Def 6=Conn 7=Other  0=all  G=gizmos  M=mesh/box",
-      12, 78, 14, GRAY);
+      12, 96, 14, GRAY);
   DrawText(
       "LMB=place/select/drag-gizmo   Tab=build/select   T/Y=move/rotate gizmo   "
       "R/Shift+R/Ctrl+R=rotate   O=overlap   C=corridors   Alt=free   Del=delete   "
       "Ctrl+Z/Y=undo/redo",
-      12, 96, 14, GRAY);
-  DrawText("WASD=fly  Q/E=turn  Z/X=up/down  RMB=orbit  MMB=pan  wheel=zoom  F=frame", 12, 114, 14,
+      12, 114, 14, GRAY);
+  DrawText("WASD=fly  Q/E=turn  Z/X=up/down  RMB=orbit  MMB=pan  wheel=zoom  F=frame", 12, 132, 14,
            GRAY);
 
   DrawFPS(screenWidth - 90, 10);
