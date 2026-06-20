@@ -19,6 +19,7 @@ it stays on pinned FetchContent in `cmake/raylib.cmake`.
 | pugixml | **v1.15** | `pugixml::pugixml` | `pugixml/{pugixml.hpp,pugixml.cpp,pugiconfig.hpp}` | https://github.com/zeux/pugixml |
 | raygui | **4.0** | `RAYGUI_INCLUDE_DIR` (header) | `raygui/raygui.h` | https://github.com/raysan5/raygui |
 | sinfl | **(raylib 5.5 bundle)** | `sinfl::sinfl` | `sinfl/sinfl.h` + `sinfl/sinfl_impl.c` | raylib `src/external/sinfl.h` (orig. vurtun/sdefl) |
+| Clay | **v0.14** | `clay::clay` (header) | `clay/clay.h` | https://github.com/nicbarker/clay |
 
 Recommended (not yet vendored) for the asset pipeline's glTF *writer*:
 **cgltf v1.15** (`cgltf.h` + `cgltf_write.h`, https://github.com/jkuhlmann/cgltf) —
@@ -42,6 +43,8 @@ curl -fsSL -o third_party/pugixml/pugiconfig.hpp \
   https://raw.githubusercontent.com/zeux/pugixml/<tag>/src/pugiconfig.hpp
 curl -fsSL -o third_party/raygui/raygui.h \
   https://raw.githubusercontent.com/raysan5/raygui/<tag>/src/raygui.h
+curl -fsSL -o third_party/clay/clay.h \
+  https://raw.githubusercontent.com/nicbarker/clay/<tag>/clay.h
 ```
 
 Then rebuild and run the tests. Updates are intentional, reviewed events — not

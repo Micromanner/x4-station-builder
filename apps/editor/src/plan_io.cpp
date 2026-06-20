@@ -17,7 +17,9 @@ namespace {
 
 constexpr const char* kPlanFile = "x4sb_plan.xml";
 
-std::string saveToDisk(EditorState& state) {
+}  // namespace
+
+std::string savePlan(EditorState& state) {
   const std::string xml = exportPlanXml(state.station(), state.catalog());
   SetClipboardText(xml.c_str());
 
@@ -40,7 +42,7 @@ std::string saveToDisk(EditorState& state) {
   return "Saved " + path.string() + " (clipboard copied)";
 }
 
-std::string loadFromDisk(EditorState& state, bool& didLoad) {
+std::string loadPlan(EditorState& state, bool& didLoad) {
   didLoad = false;
   std::error_code ec;
   std::filesystem::path dir = platform::defaultConstructionPlanDir();
@@ -75,14 +77,12 @@ std::string loadFromDisk(EditorState& state, bool& didLoad) {
   return "Loaded " + newest.filename().string();
 }
 
-}  // namespace
-
 PlanIoOutcome handlePlanIoKeys(EditorState& state) {
   if (!isCtrlDown()) return {};
-  if (IsKeyPressed(KEY_S)) return {saveToDisk(state), false};
+  if (IsKeyPressed(KEY_S)) return {savePlan(state), false};
   if (IsKeyPressed(KEY_O)) {
     bool loaded = false;
-    std::string msg = loadFromDisk(state, loaded);
+    std::string msg = loadPlan(state, loaded);
     return {std::move(msg), loaded};
   }
   return {};

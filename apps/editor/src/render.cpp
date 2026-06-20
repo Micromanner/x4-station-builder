@@ -923,7 +923,7 @@ void drawScene(const Station& station, const ModuleCatalog& catalog, const ::Cam
   endScene();
 }
 
-void drawHud(const EditorState& state, int screenWidth, int /*screenHeight*/, bool showGizmos) {
+void drawHud(const EditorState& state, int /*screenWidth*/, int /*screenHeight*/, bool showGizmos) {
   const ModuleDef* def = state.activeDef();
   char line[256];
 
@@ -940,9 +940,8 @@ void drawHud(const EditorState& state, int screenWidth, int /*screenHeight*/, bo
                 def != nullptr ? state.activeIndex() + 1 : 0, state.activeCount());
   DrawText(line, 12, 34, 18, SKYBLUE);
 
-  std::snprintf(line, sizeof(line),
-                "Placed: %zu    Undo:%s  Redo:%s    Gizmos:%s    Overlap:%s    Corridors:%s",
-                state.station().size(), state.canUndo() ? "on" : "-", state.canRedo() ? "on" : "-",
+  // Placed/Undo/Redo/FPS now live in the Clay top bar; keep the toggles here.
+  std::snprintf(line, sizeof(line), "Gizmos:%s    Overlap:%s    Corridors:%s",
                 showGizmos ? "on" : "off", state.allowOverlap() ? "ON" : "off",
                 state.showAllClearance() ? "ON" : "off");
   DrawText(line, 12, 56, 16, LIGHTGRAY);
@@ -959,8 +958,6 @@ void drawHud(const EditorState& state, int screenWidth, int /*screenHeight*/, bo
       12, 114, 14, GRAY);
   DrawText("WASD=fly  Q/E=turn  Z/X=up/down  RMB=orbit  MMB=pan  wheel=zoom  F=frame", 12, 132, 14,
            GRAY);
-
-  DrawFPS(screenWidth - 90, 10);
 }
 
 void drawToast(const std::string& message, int screenHeight) {

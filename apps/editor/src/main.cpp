@@ -3,6 +3,8 @@
 // logic in libs/editorcore) and draw it. All scene geometry is in X4 native space;
 // the renderer applies the single (1,1,-1) handedness flip.
 #include "app_paths.hpp"
+#include "clay.h"
+#include "clay_raylib.hpp"
 #include "connbench.hpp"
 #include "gizmoshot.hpp"
 #include "input.hpp"
@@ -19,15 +21,20 @@
 #include "rdc_capture.hpp"
 #include "render.hpp"
 #include "snaptest.hpp"
+#include "ui_fonts.hpp"
+#include "ui_topbar.hpp"
+#include "uishot.hpp"
 #include "x4sb/data/catalog.hpp"
 #include "x4sb/editorcore/display_flip.hpp"
 #include "x4sb/editorcore/editor_state.hpp"
 
+#include <cstdint>
 #include <cstdio>
 #include <cstdlib>
 #include <filesystem>
 #include <optional>
 #include <string>
+#include <vector>
 
 namespace {
 constexpr int kScreenW = 1280;
@@ -99,6 +106,9 @@ int main(int argc, char** argv) {
     if (std::string(argv[i]) == "--gizmoshot") {
       return x4sb::editor::runGizmoShot(std::string(argv[i + 1]));
     }
+    if (std::string(argv[i]) == "--uishot") {
+      return x4sb::editor::runUiShot(std::string(argv[i + 1]));
+    }
     if (std::string(argv[i]) == "--gizmosweep") {
       return x4sb::editor::runGizmoSweep();
     }
@@ -139,6 +149,13 @@ int main(int argc, char** argv) {
   {
     x4sb::editor::MeshCache meshes{std::filesystem::path(*catalogPath).parent_path()};
     x4sb::editor::OrbitCamera cam;
+
+    // Clay UI: fonts + arena live for the whole render loop. clayMem backs Clay's
+    // arena and Clay keeps the raw pointer (no copy), so it must outlive every
+    // Clay call below — hence a long-lived local in this block, not a temporary.
+    x4sb::editor::UiFonts uiFonts = x4sb::editor::loadUiFonts();
+    std::vector<std::uint8_t> clayMem =
+        x4sb::editor::clayInit(GetScreenWidth(), GetScreenHeight(), uiFonts);
     // Free-place standoff baseline: captured from the orbit distance now and on each
     // build-mode entry (below), then held — so zooming never drags the ghost in/out.
     state.setPlaceDistance(cam.distance());
@@ -194,17 +211,57 @@ int main(int argc, char** argv) {
           x4sb::editor::loadStationMeshes(state.station(), state.catalog(), meshes);
         }
 
-        x4sb::editor::handleMouse(state, cam.camera());
+        // Feed Clay this frame's viewport + pointer, then suppress the 3D mouse when
+        // the pointer is over the bar so a button click doesn't also place/select in
+        // the scene. topBarHeight() is the correct capture test while the bar is
+        // full-width.
+        const bool pointerOnUi = static_cast<float>(GetMouseY()) < x4sb::editor::topBarHeight();
+        Clay_SetLayoutDimensions(Clay_Dimensions{static_cast<float>(GetScreenWidth()),
+                                                 static_cast<float>(GetScreenHeight())});
+        Clay_SetPointerState(
+            Clay_Vector2{static_cast<float>(GetMouseX()), static_cast<float>(GetMouseY())},
+            IsMouseButtonDown(MOUSE_BUTTON_LEFT));
+        if (!pointerOnUi) x4sb::editor::handleMouse(state, cam.camera());
       }
 
       BeginDrawing();
       ClearBackground(::Color{30, 30, 38, 255});
       x4sb::editor::drawScene(state, cam.camera(), meshes, showGizmos, showMeshes, lodEnabled);
       x4sb::editor::drawHud(state, GetScreenWidth(), GetScreenHeight(), showGizmos);
+      // Top bar drawn over the HUD so it sits on top. The action is dispatched right
+      // after EndDrawing (mutating state for next frame is fine).
+      Clay_BeginLayout();
+      const x4sb::editor::TopBarAction action = x4sb::editor::topBar(state, GetFPS());
+      const Clay_RenderCommandArray uiCmds = Clay_EndLayout();
+      x4sb::editor::renderClayCommands(uiCmds, uiFonts);
       if (GetTime() < toastUntil) x4sb::editor::drawToast(toast, GetScreenHeight());
       EndDrawing();
       FrameMark;
+
+      switch (action) {
+        case x4sb::editor::TopBarAction::Save:
+          toast = x4sb::editor::savePlan(state);
+          toastUntil = GetTime() + 4.0;
+          break;
+        case x4sb::editor::TopBarAction::Open: {
+          bool loaded = false;
+          toast = x4sb::editor::loadPlan(state, loaded);
+          toastUntil = GetTime() + 4.0;
+          if (loaded) x4sb::editor::loadStationMeshes(state.station(), state.catalog(), meshes);
+          break;
+        }
+        case x4sb::editor::TopBarAction::Undo:
+          if (state.canUndo()) state.undo();
+          break;
+        case x4sb::editor::TopBarAction::Redo:
+          if (state.canRedo()) state.redo();
+          break;
+        case x4sb::editor::TopBarAction::None:
+          break;
+      }
     }
+
+    x4sb::editor::unloadUiFonts(uiFonts);
   }  // meshes destroyed here (UnloadModel) before CloseWindow
 
   CloseWindow();

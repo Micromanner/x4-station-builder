@@ -35,6 +35,14 @@ add_library(sinfl STATIC ${CMAKE_CURRENT_SOURCE_DIR}/sinfl/sinfl_impl.c)
 add_library(sinfl::sinfl ALIAS sinfl)
 target_include_directories(sinfl SYSTEM PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/sinfl)
 
+# Clay — single-header immediate-mode UI LAYOUT lib (C). The implementation TU
+# lives in apps/editor (clay_impl.c), like raygui; here we only expose the header.
+# We write our OWN Clay->raylib renderer (apps/editor/src/clay_raylib.cpp) rather
+# than vendoring Clay's example renderer. SYSTEM keeps it out of the -Werror gate.
+add_library(clay INTERFACE)
+add_library(clay::clay ALIAS clay)
+target_include_directories(clay SYSTEM INTERFACE ${CMAKE_CURRENT_SOURCE_DIR}/clay)
+
 # RenderDoc in-app API — a single vendored header, NO library (renderdoc.dll is
 # injected at runtime by `renderdoccmd`). Header-only INTERFACE target so the editor
 # can trigger programmatic frame captures; it is a no-op unless launched under

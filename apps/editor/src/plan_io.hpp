@@ -14,6 +14,12 @@ struct PlanIoOutcome {
   bool reloaded{false};  // Ctrl+O loaded a new station -> caller should pre-warm its meshes
 };
 
+// Export the station (-> <profile>/constructionplan/x4sb_plan.xml + clipboard) and
+// load the newest plan there. Public so both Ctrl+S/O and the top-bar buttons use
+// one path. loadPlan sets didLoad when a station was replaced (caller pre-warms meshes).
+[[nodiscard]] std::string savePlan(EditorState& state);
+[[nodiscard]] std::string loadPlan(EditorState& state, bool& didLoad);
+
 // Handle Ctrl+S (export station -> <profile>/constructionplan/x4sb_plan.xml +
 // clipboard) and Ctrl+O (load newest *.xml there -> EditorState) for this frame.
 [[nodiscard]] PlanIoOutcome handlePlanIoKeys(EditorState& state);

@@ -6,8 +6,7 @@
 
 namespace x4sb::editor {
 
-std::optional<std::string> findCatalogJson() {
-  const std::string rel = "asset-cache/catalog.json";
+std::optional<std::string> findAsset(const std::string& rel) {
   const std::array<std::string, 2> bases{std::string{}, std::string{GetApplicationDirectory()}};
   const std::array<std::string, 5> ups{"", "../", "../../", "../../../", "../../../../"};
   for (const auto& base : bases) {
@@ -18,5 +17,7 @@ std::optional<std::string> findCatalogJson() {
   }
   return std::nullopt;
 }
+
+std::optional<std::string> findCatalogJson() { return findAsset("asset-cache/catalog.json"); }
 
 }  // namespace x4sb::editor

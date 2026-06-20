@@ -3,6 +3,7 @@
 add_executable(x4sb-editor
   src/main.cpp
   src/app_paths.cpp
+  src/ui_fonts.cpp
   src/orbit_camera.cpp
   src/render.cpp
   src/input.cpp
@@ -18,7 +19,11 @@ add_executable(x4sb-editor
   src/rdc_api.cpp
   src/rdc_capture.cpp
   src/plan_io.cpp
-  src/raygui_impl.c)
+  src/raygui_impl.c
+  src/clay_impl.c
+  src/clay_raylib.cpp
+  src/ui_topbar.cpp
+  src/uishot.cpp)
 
 # SYSTEM so the first-party -Werror harness ignores warnings from the raygui header.
 target_include_directories(x4sb-editor SYSTEM PRIVATE ${RAYGUI_INCLUDE_DIR})
@@ -33,7 +38,12 @@ target_link_libraries(x4sb-editor PRIVATE
   x4sb_coords
   x4sb_platform
   raylib
+  clay::clay
   renderdoc::app)
+
+# Clay requires C++20 (clay.h #errors below it). The editor is the only target
+# that includes Clay; the render-free libs remain C++17.
+set_target_properties(x4sb-editor PROPERTIES CXX_STANDARD 20 CXX_STANDARD_REQUIRED ON)
 
 # Tracy profiler client (full-tracy preset only). Linking it defines TRACY_ENABLE
 # PUBLIC, switching src/profiling.hpp onto the real zone macros.
