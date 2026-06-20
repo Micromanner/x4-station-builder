@@ -1,0 +1,5 @@
+# Vendored, frozen deps are never reformatted (dependency policy in CLAUDE.md).
+# clang-format walks up to the nearest .clang-format, so this neutralizes the
+# whole third_party/ subtree even if someone runs a blanket `clang-format -i`.
+DisableFormat: true
+SortIncludes: Never

@@ -1,6 +1,12 @@
 # Formatting for x4sb. Matches the existing house style: 2-space indent, attached
 # braces, `Type& name` / `Type* name`, and `}  // namespace x4sb` trailers.
-# Run: clang-format -i $(git ls-files '*.cpp' '*.hpp')   (CI uses --dry-run -Werror)
+#
+# requires clang-format 22.1.5 (pinned, reproducible cross-platform).
+#   install: pip install clang-format==22.1.5   (use the wheel, not system LLVM,
+#   to avoid version skew — see docs/2026-06-17-known-issues.md issue 4.2).
+# Run over first-party code only (third_party/ has DisableFormat):
+#   clang-format -i $(git ls-files 'libs/*.cpp' 'libs/*.hpp' 'apps/*.cpp' 'apps/*.hpp' 'tests/*.cpp' 'tests/*.hpp')
+# CI uses --dry-run -Werror.
 ---
 Language:        Cpp
 BasedOnStyle:    Google
