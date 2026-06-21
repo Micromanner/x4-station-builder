@@ -115,17 +115,25 @@ class EditorState {
   // selection, and ghost reset.
   void loadStation(Station station);
 
-  // ── Auto-layout cart (parent §7) ──────────────────────────────────────────
-  // A quantity list built from the palette: cartAdd/cartRemove act on the active
-  // module; runAutoLayout commits the whole layout as ONE undoable step and clears
-  // the cart. The polished quantity editor is a later (step-6 / Clay) concern.
+  // ── Auto-layout cart (parent §7) + Auto Build mode (step-6 quantity editor) ──
+  // The cart is a quantity list (macro id -> count) the auto-layout engine places
+  // as ONE undoable step. cartAdjust is the by-id editing primitive the palette
+  // steppers call; cartAdd/cartRemove keep acting on the active module for the
+  // keyboard path. Auto Build mode only flips how the palette renders (counts +
+  // steppers) — the cart itself is editable in any mode.
   void cartAdd();
   void cartRemove();
   void cartClear() { cart_.clear(); }
+  void cartAdjust(const std::string& id, int delta);         // clamps at >=0; erases at 0
+  [[nodiscard]] int cartCount(const std::string& id) const;  // 0 if absent
   [[nodiscard]] const QuantityList& cart() const { return cart_; }
   [[nodiscard]] int cartTotal() const;
   [[nodiscard]] std::string cartSummary() const;
   AutoLayoutReport runAutoLayout();
+
+  void setAutoBuildMode(bool on) { autoBuildMode_ = on; }
+  void toggleAutoBuildMode() { autoBuildMode_ = !autoBuildMode_; }
+  [[nodiscard]] bool autoBuildMode() const { return autoBuildMode_; }
 
   // ── Selection / deletion ────────────────────────────────────────────────
   // Pick the nearest module along the X4-space ray; sets (or clears on a miss)
@@ -207,6 +215,7 @@ class EditorState {
   bool placementEnabled_{true};   // false = select mode (no ghost; clicks select)
   bool allowOverlap_{false};      // false = block overlap (mirrors X4's editor default)
   bool showAllClearance_{false};  // render-only: draw every dock's corridor when true
+  bool autoBuildMode_{false};     // step-6: palette shows per-row counts + steppers when true
 
   mutable std::optional<ConnectorGrid> connectorGrid_;  // built lazily by connectorGrid()
   mutable bool gridDirty_{true};                        // true => rebuild on next access

@@ -11,6 +11,7 @@
 #include <cstdint>
 #include <cstdio>
 #include <optional>
+#include <string>
 #include <vector>
 
 namespace x4sb::editor {
@@ -62,6 +63,30 @@ void chip(const ChipDef& cd, const std::optional<Category>& filter, PaletteActio
   }
 }
 
+// A small square +/- button for one cart row. On click it writes an AdjustCart
+// intent (module id + signed delta) into `out`; the caller chose the magnitude.
+// Carrying the id (not the row index) keeps the edit correct regardless of the
+// view, since the cart is keyed by id.
+void stepper(Clay_ElementId eid, const char* label, const std::string& id, int delta,
+             PaletteAction& out) {
+  const bool hovered = Clay_PointerOver(eid);
+  if (hovered && IsMouseButtonReleased(MOUSE_BUTTON_LEFT)) {
+    out.kind = PaletteActionKind::AdjustCart;
+    out.id = id;
+    out.delta = delta;
+  }
+  CLAY({.id = eid,
+        .layout = {.sizing = {.width = CLAY_SIZING_FIXED(20), .height = CLAY_SIZING_FIXED(20)},
+                   .childAlignment = {.x = CLAY_ALIGN_X_CENTER, .y = CLAY_ALIGN_Y_CENTER}},
+        .backgroundColor = kStyledGate,
+        .userData = styleTag(hovered ? StyleTag::ChipActive : StyleTag::Chip)}) {
+    CLAY_TEXT(clayStr(label), CLAY_TEXT_CONFIG({.textColor = hovered ? kValue : kLabel,
+                                                .fontId = static_cast<std::uint16_t>(FontId::Value),
+                                                .fontSize = 16,
+                                                .letterSpacing = 0}));
+  }
+}
+
 }  // namespace
 
 float paletteWidth() { return kPanelWidth; }
@@ -73,11 +98,6 @@ PaletteAction palette(const EditorState& state) {
   const std::vector<const ModuleDef*>& view = state.filteredView();
   const std::size_t activeIndex = state.activeIndex();
 
-  // static: Clay holds this pointer until render (after EndLayout); a per-call buffer
-  // would dangle. Single UI thread + immediate redraw makes overwrite-next-frame safe.
-  static char cartLine[48];
-  std::snprintf(cartLine, sizeof(cartLine), "Cart: %d  -  Enter to build", state.cartTotal());
-
   CLAY({.id = CLAY_ID("Palette"),
         .layout = {.sizing = {.width = CLAY_SIZING_FIXED(kPanelWidth),
                               .height = CLAY_SIZING_GROW(0)},
@@ -86,6 +106,27 @@ PaletteAction palette(const EditorState& state) {
                    .layoutDirection = CLAY_TOP_TO_BOTTOM},
         .backgroundColor = kStyledGate,
         .userData = styleTag(StyleTag::Panel)}) {
+    // Auto Build mode toggle — full-width header. On => rows show counts + steppers.
+    {
+      const Clay_ElementId eid = CLAY_ID("AutoBuildToggle");
+      const bool on = state.autoBuildMode();
+      const bool hovered = Clay_PointerOver(eid);
+      if (hovered && IsMouseButtonReleased(MOUSE_BUTTON_LEFT))
+        action.kind = PaletteActionKind::ToggleAutoBuild;
+      CLAY({.id = eid,
+            .layout = {.sizing = {.width = CLAY_SIZING_GROW(0)},
+                       .padding = {8, 8, 6, 6},
+                       .childAlignment = {.x = CLAY_ALIGN_X_CENTER}},
+            .backgroundColor = kStyledGate,
+            .userData = styleTag(on ? StyleTag::ChipActive : StyleTag::Chip)}) {
+        CLAY_TEXT(clayStr(on ? "Auto Build: ON" : "Auto Build"),
+                  CLAY_TEXT_CONFIG({.textColor = on ? kValue : (hovered ? kAmber : kLabel),
+                                    .fontId = static_cast<std::uint16_t>(FontId::Value),
+                                    .fontSize = 15,
+                                    .letterSpacing = 1}));
+      }
+    }
+
     // Clay has no flex-wrap, so lay the chips out in explicit rows of four; the row
     // count and last-row remainder derive from kChips.size() (no hard-coded count).
     constexpr std::size_t kChipCols = 4;
@@ -103,6 +144,12 @@ PaletteAction palette(const EditorState& state) {
                      .childGap = 2,
                      .layoutDirection = CLAY_TOP_TO_BOTTOM},
           .clip = {.vertical = true, .childOffset = Clay_GetScrollOffset()}}) {
+      const bool autoBuild = state.autoBuildMode();
+      // One count string per visible row; Clay reads these pointers at render time,
+      // so they must stay valid for the whole frame. Reused across frames (grows only).
+      static std::vector<std::array<char, 12>> countBuf;
+      if (autoBuild) countBuf.resize(view.size());
+
       for (std::size_t i = 0; i < view.size(); ++i) {
         const ModuleDef* def = view[i];
         const Clay_ElementId rowId = CLAY_IDI("PaletteRow", static_cast<std::uint32_t>(i));
@@ -131,19 +178,59 @@ PaletteAction palette(const EditorState& state) {
                                       .fontId = static_cast<std::uint16_t>(FontId::Value),
                                       .fontSize = 15,
                                       .letterSpacing = 0}));
+          if (autoBuild) {
+            CLAY({.layout = {.sizing = {.width = CLAY_SIZING_GROW(0)}}}) {}  // push to the right
+            std::snprintf(countBuf[i].data(), countBuf[i].size(), "%d", state.cartCount(def->id));
+            CLAY_TEXT(clayStr(countBuf[i].data()),
+                      CLAY_TEXT_CONFIG({.textColor = kValue,
+                                        .fontId = static_cast<std::uint16_t>(FontId::Value),
+                                        .fontSize = 15,
+                                        .letterSpacing = 0}));
+            const int step = (IsKeyDown(KEY_LEFT_SHIFT) || IsKeyDown(KEY_RIGHT_SHIFT)) ? 10 : 1;
+            const auto u = static_cast<std::uint32_t>(i);
+            stepper(CLAY_IDI("CartMinus", u), "-", def->id, -step, action);
+            stepper(CLAY_IDI("CartPlus", u), "+", def->id, step, action);
+          }
         }
       }
     }
 
-    // Cart summary footer — display only; the real quantity editor is slice 3.
-    CLAY({.layout = {.sizing = {.width = CLAY_SIZING_GROW(0)}, .padding = {6, 6, 6, 6}},
-          .backgroundColor = kStyledGate,
-          .userData = styleTag(StyleTag::Recessed)}) {
-      CLAY_TEXT(clayStr(cartLine),
-                CLAY_TEXT_CONFIG({.textColor = kValue,
-                                  .fontId = static_cast<std::uint16_t>(FontId::Value),
-                                  .fontSize = 14,
-                                  .letterSpacing = 0}));
+    // Total + Build footer. Visible in Auto Build mode OR whenever the cart holds
+    // anything (a keyboard-built cart still surfaces). Build is live only when > 0.
+    const int cartTotal = state.cartTotal();
+    if (state.autoBuildMode() || cartTotal > 0) {
+      static char totalLine[32];
+      std::snprintf(totalLine, sizeof(totalLine), "Total: %d modules", cartTotal);
+      CLAY({.layout = {.sizing = {.width = CLAY_SIZING_GROW(0)},
+                       .padding = {6, 6, 6, 6},
+                       .childGap = 6,
+                       .childAlignment = {.y = CLAY_ALIGN_Y_CENTER}},
+            .backgroundColor = kStyledGate,
+            .userData = styleTag(StyleTag::Recessed)}) {
+        CLAY_TEXT(clayStr(totalLine),
+                  CLAY_TEXT_CONFIG({.textColor = kValue,
+                                    .fontId = static_cast<std::uint16_t>(FontId::Value),
+                                    .fontSize = 14,
+                                    .letterSpacing = 0}));
+        CLAY({.layout = {.sizing = {.width = CLAY_SIZING_GROW(0)}}}) {}  // spacer
+        const bool canBuild = cartTotal > 0;
+        const Clay_ElementId buildId = CLAY_ID("CartBuild");
+        const bool hovered = Clay_PointerOver(buildId);
+        if (canBuild && hovered && IsMouseButtonReleased(MOUSE_BUTTON_LEFT))
+          action.kind = PaletteActionKind::Build;
+        CLAY({.id = buildId,
+              .layout = {.sizing = {.width = CLAY_SIZING_FIXED(64)},
+                         .padding = {8, 8, 4, 4},
+                         .childAlignment = {.x = CLAY_ALIGN_X_CENTER}},
+              .backgroundColor = kStyledGate,
+              .userData = styleTag(canBuild ? StyleTag::ChipActive : StyleTag::Chip)}) {
+          CLAY_TEXT(clayStr("Build"),
+                    CLAY_TEXT_CONFIG({.textColor = canBuild ? (hovered ? kAmber : kValue) : kLabel,
+                                      .fontId = static_cast<std::uint16_t>(FontId::Value),
+                                      .fontSize = 14,
+                                      .letterSpacing = 1}));
+        }
+      }
     }
   }
   return action;

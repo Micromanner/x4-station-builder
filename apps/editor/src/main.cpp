@@ -174,6 +174,15 @@ int main(int argc, char** argv) {
       toastUntil = GetTime() + kToastSeconds;
     };
 
+    // The cart -> auto-layout run, shared by the Enter key and the Build button:
+    // one undoable layout + a report toast + warming the new modules' meshes.
+    const auto runBuild = [&]() {
+      const x4sb::AutoLayoutReport rep = state.runAutoLayout();
+      setToast("auto-layout: snapped " + std::to_string(rep.snapped) + ", floating " +
+               std::to_string(rep.floating) + ", skipped " + std::to_string(rep.skipped));
+      x4sb::editor::loadStationMeshes(state.station(), state.catalog(), meshes);
+    };
+
     while (!WindowShouldClose()) {
       {
         ZoneScopedN("input+update");
@@ -222,13 +231,7 @@ int main(int argc, char** argv) {
           x4sb::editor::loadStationMeshes(state.station(), state.catalog(), meshes);
         }
 
-        if (IsKeyPressed(KEY_ENTER)) {
-          const x4sb::AutoLayoutReport rep = state.runAutoLayout();
-          setToast("auto-layout: snapped " + std::to_string(rep.snapped) + ", floating " +
-                   std::to_string(rep.floating) + ", skipped " + std::to_string(rep.skipped));
-          // New modules need their meshes resident (mirror the plan-load warm path).
-          x4sb::editor::loadStationMeshes(state.station(), state.catalog(), meshes);
-        }
+        if (IsKeyPressed(KEY_ENTER)) runBuild();
 
         // Feed Clay this frame's viewport + pointer, then suppress the 3D mouse when
         // the pointer is over any panel so a button/list click doesn't also place or
@@ -300,6 +303,15 @@ int main(int argc, char** argv) {
           break;
         case x4sb::editor::PaletteActionKind::SetActive:
           state.setActiveIndex(palAction.index);
+          break;
+        case x4sb::editor::PaletteActionKind::ToggleAutoBuild:
+          state.toggleAutoBuildMode();
+          break;
+        case x4sb::editor::PaletteActionKind::AdjustCart:
+          state.cartAdjust(palAction.id, palAction.delta);
+          break;
+        case x4sb::editor::PaletteActionKind::Build:
+          runBuild();
           break;
         case x4sb::editor::PaletteActionKind::None:
           break;

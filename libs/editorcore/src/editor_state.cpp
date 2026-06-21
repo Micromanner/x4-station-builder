@@ -402,15 +402,24 @@ std::optional<GizmoHandle> EditorState::highlightHandle() const {
 }
 
 void EditorState::cartAdd() {
-  if (const ModuleDef* d = activeDef()) ++cart_[d->id];
+  if (const ModuleDef* d = activeDef()) cartAdjust(d->id, 1);
 }
 
 void EditorState::cartRemove() {
-  const ModuleDef* d = activeDef();
-  if (d == nullptr) return;
-  const auto it = cart_.find(d->id);
-  if (it == cart_.end()) return;
-  if (--it->second <= 0) cart_.erase(it);
+  if (const ModuleDef* d = activeDef()) cartAdjust(d->id, -1);
+}
+
+void EditorState::cartAdjust(const std::string& id, int delta) {
+  const int next = cartCount(id) + delta;
+  if (next <= 0)
+    cart_.erase(id);  // no zero/negative rows: 0 means "not in the cart"
+  else
+    cart_[id] = next;
+}
+
+int EditorState::cartCount(const std::string& id) const {
+  const auto it = cart_.find(id);
+  return it == cart_.end() ? 0 : it->second;
 }
 
 int EditorState::cartTotal() const {

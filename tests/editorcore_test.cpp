@@ -660,6 +660,45 @@ TEST_CASE("cartSummary is deterministic and human-readable") {
   CHECK(sum.find("x1") != std::string::npos);
 }
 
+TEST_CASE("cartAdjust adds, steps, clamps at zero, and erases; cartCount reflects it") {
+  const ModuleCatalog c = twoModuleCatalog();
+  EditorState s(c);
+
+  CHECK(s.cartCount("a_mod") == 0);
+  s.cartAdjust("a_mod", 1);
+  CHECK(s.cartCount("a_mod") == 1);
+  s.cartAdjust("a_mod", 10);  // Shift-step
+  CHECK(s.cartCount("a_mod") == 11);
+  s.cartAdjust("a_mod", -10);
+  CHECK(s.cartCount("a_mod") == 1);
+  s.cartAdjust("a_mod", -5);  // over-subtract clamps to 0, not negative
+  CHECK(s.cartCount("a_mod") == 0);
+  CHECK(s.cart().count("a_mod") == 0u);  // erased, not a lingering zero entry
+}
+
+TEST_CASE("cart counts are keyed by id, so they persist across filter changes") {
+  const ModuleCatalog c = twoModuleCatalog();
+  EditorState s(c);
+
+  s.cartAdjust("b_mod", 3);
+  s.setFilter(Category::Production);  // b_mod is not in this view
+  CHECK(s.cartCount("b_mod") == 3);
+  CHECK(s.cartTotal() == 3);
+  s.setFilter(std::nullopt);
+  CHECK(s.cartCount("b_mod") == 3);
+}
+
+TEST_CASE("autoBuildMode defaults off and toggles") {
+  const ModuleCatalog c = twoModuleCatalog();
+  EditorState s(c);
+
+  CHECK_FALSE(s.autoBuildMode());
+  s.toggleAutoBuildMode();
+  CHECK(s.autoBuildMode());
+  s.setAutoBuildMode(false);
+  CHECK_FALSE(s.autoBuildMode());
+}
+
 TEST_CASE("filteredView mirrors the active-cursor order and tracks the filter") {
   const ModuleCatalog c = twoModuleCatalog();
   EditorState s(c);

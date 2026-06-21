@@ -101,7 +101,15 @@ int runUiShot(const std::string& outPrefix) {
     shoot(state, cam, meshes, fonts, ::Vector2{70, 18}, outPrefix + "_hover.png");  // over Save
     shoot(state, cam, meshes, fonts, ::Vector2{120, 200},
           outPrefix + "_palette.png");  // pointer over a module row
-    std::printf("uishot: wrote %s_{idle,hover,palette}.png\n", outPrefix.c_str());
+    state.setAutoBuildMode(true);
+    // Seed from the rendered view (sorted, player-buildable) so a VISIBLE top row
+    // shows a non-zero count — catalog->all() is unordered and may hit hidden ids.
+    for (const auto* def : state.filteredView()) {
+      state.cartAdjust(def->id, 4);
+      if (state.cartTotal() >= 8) break;
+    }
+    shoot(state, cam, meshes, fonts, ::Vector2{120, 200}, outPrefix + "_autobuild.png");
+    std::printf("uishot: wrote %s_{idle,hover,palette,autobuild}.png\n", outPrefix.c_str());
 
     unloadUiFonts(fonts);
   }
