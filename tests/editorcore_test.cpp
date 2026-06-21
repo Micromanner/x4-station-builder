@@ -659,3 +659,37 @@ TEST_CASE("cartSummary is deterministic and human-readable") {
   CHECK(sum.find("a_mod") != std::string::npos);
   CHECK(sum.find("x1") != std::string::npos);
 }
+
+TEST_CASE("filteredView mirrors the active-cursor order and tracks the filter") {
+  const ModuleCatalog c = twoModuleCatalog();
+  EditorState s(c);
+
+  std::vector<const ModuleDef*> view = s.filteredView();
+  REQUIRE(view.size() == 2);
+  CHECK(view[0]->id == "a_mod");  // sorted by id, same order cycleActive walks
+  CHECK(view[1]->id == "b_mod");
+
+  s.setFilter(Category::Storage);
+  view = s.filteredView();
+  REQUIRE(view.size() == 1);
+  CHECK(view[0]->id == "b_mod");
+
+  s.setFilter(Category::Defense);  // empty category
+  CHECK(s.filteredView().empty());
+}
+
+TEST_CASE("setActiveIndex selects by absolute position and ignores out-of-range") {
+  const ModuleCatalog c = twoModuleCatalog();
+  EditorState s(c);
+
+  s.setActiveIndex(1);
+  REQUIRE(s.activeDef() != nullptr);
+  CHECK(s.activeDef()->id == "b_mod");
+
+  s.setActiveIndex(99);  // out of range -> unchanged
+  REQUIRE(s.activeDef() != nullptr);
+  CHECK(s.activeDef()->id == "b_mod");
+
+  s.setActiveIndex(0);
+  CHECK(s.activeDef()->id == "a_mod");
+}

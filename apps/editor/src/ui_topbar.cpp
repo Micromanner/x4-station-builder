@@ -7,7 +7,6 @@
 
 #include <cstdint>
 #include <cstdio>
-#include <string>
 
 namespace x4sb::editor {
 namespace {
@@ -25,17 +24,6 @@ constexpr Clay_Color kDisabled{90, 100, 108, 255};
 constexpr Clay_Color kGlossFill{26, 32, 38, 255};
 constexpr Clay_Color kRecessedFill{10, 11, 14, 153};
 
-// Non-owning Clay string. Clay references these bytes until renderClayCommands
-// (clay.h:2855), so `s` must outlive the frame's EndLayout — callers pass string
-// literals or function-static buffers, never per-call stack buffers.
-Clay_String clayStr(const char* s) {
-  return Clay_String{.isStaticallyAllocated = false,
-                     .length = static_cast<std::int32_t>(std::char_traits<char>::length(s)),
-                     .chars = s};
-}
-
-void* tag(StyleTag t) { return reinterpret_cast<void*>(static_cast<std::uintptr_t>(t)); }
-
 // One clickable button. Hover -> amber label + brighter recessed fill; disabled ->
 // dimmed label and ignored clicks. Records into `clicked` if released over it.
 // `id` and `label` must be string literals (outlive the frame; see clayStr).
@@ -51,7 +39,7 @@ void button(const char* id, const char* label, bool enabled, TopBarAction action
   CLAY({.id = eid,
         .layout = {.padding = {10, 10, 6, 6}},
         .backgroundColor = kRecessedFill,
-        .userData = tag(StyleTag::Recessed)}) {
+        .userData = styleTag(StyleTag::Recessed)}) {
     CLAY_TEXT(clayStr(label),
               CLAY_TEXT_CONFIG({.textColor = text,
                                 .fontId = static_cast<std::uint16_t>(FontId::Display),
@@ -93,7 +81,7 @@ TopBarAction topBar(const EditorState& state, double fps) {
                   .childGap = 4,
                   .childAlignment = {.y = CLAY_ALIGN_Y_CENTER}},
        .backgroundColor = kGlossFill,
-       .userData = tag(StyleTag::GlossBar)}) {
+       .userData = styleTag(StyleTag::GlossBar)}) {
     button("BtnOpen", "Open", true, TopBarAction::Open, clicked);
     button("BtnSave", "Save", true, TopBarAction::Save, clicked);
     button("BtnUndo", "Undo", state.canUndo(), TopBarAction::Undo, clicked);

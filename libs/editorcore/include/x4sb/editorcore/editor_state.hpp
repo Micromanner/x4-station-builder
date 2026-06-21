@@ -46,7 +46,15 @@ class EditorState {
   [[nodiscard]] std::size_t activeIndex() const { return activeIndex_; }
   [[nodiscard]] std::size_t activeCount() const;  // size of the filtered view
   void cycleActive(int delta);                    // wraps; no-op if view empty
-  void setFilter(std::optional<Category> cat);    // resets activeIndex to 0
+  // The filtered, sorted module list the palette renders as rows — the SAME order
+  // the [ / ] cursor traverses, so list and cursor never diverge. Empty when the
+  // current filter matches nothing. Memoized (rebuilt only when setFilter changes
+  // the filter), so the per-frame palette read allocates nothing.
+  [[nodiscard]] const std::vector<const ModuleDef*>& filteredView() const;
+  // Absolute click-to-select for the palette; no-op when out of range. Complements
+  // the relative cycleActive the bracket keys use.
+  void setActiveIndex(std::size_t index);
+  void setFilter(std::optional<Category> cat);  // resets activeIndex to 0
   [[nodiscard]] std::optional<Category> filter() const { return filter_; }
 
   // ── Placement ───────────────────────────────────────────────────────────
@@ -177,7 +185,6 @@ class EditorState {
   [[nodiscard]] std::vector<SnapLink> activeSnapLinks() const;
 
  private:
-  [[nodiscard]] std::vector<std::string> filteredOrder() const;
   // Single funnel for committing commands so every mutation dirties the grid.
   void execute(std::unique_ptr<Command> cmd);
   // Placement validity for a candidate body at `xf`: body overlap is bypassable
@@ -203,6 +210,12 @@ class EditorState {
 
   mutable std::optional<ConnectorGrid> connectorGrid_;  // built lazily by connectorGrid()
   mutable bool gridDirty_{true};                        // true => rebuild on next access
+
+  // `order_` narrowed by `filter_`, resolved to defs in the same sort. A pure
+  // function of `filter_` (order_/catalog_ are fixed after construction), so it is
+  // rebuilt only when setFilter() invalidates it — same logical-const lazy-cache
+  // idiom as connectorGrid_.
+  mutable std::optional<std::vector<const ModuleDef*>> filteredViewCache_;
 
   // In-progress gizmo drag (none when not dragging).
   struct GizmoDrag {

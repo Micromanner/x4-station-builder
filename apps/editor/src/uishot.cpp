@@ -10,6 +10,8 @@
 #include "raylib_convert.hpp"  // toRl
 #include "render.hpp"
 #include "ui_fonts.hpp"
+#include "ui_inspector.hpp"
+#include "ui_palette.hpp"
 #include "ui_topbar.hpp"
 #include "x4sb/data/catalog.hpp"
 #include "x4sb/document/station.hpp"
@@ -39,7 +41,16 @@ void shoot(EditorState& state, const ::Camera3D& cam, MeshCache& meshes, const U
     ClearBackground(::Color{30, 30, 38, 255});
     drawScene(state, cam, meshes, /*showGizmos=*/true, /*showMeshes=*/true);
     Clay_BeginLayout();
-    (void)topBar(state, 60.0);
+    CLAY({.id = CLAY_ID("ChromeRoot"),
+          .layout = {.sizing = {.width = CLAY_SIZING_GROW(0), .height = CLAY_SIZING_GROW(0)},
+                     .layoutDirection = CLAY_TOP_TO_BOTTOM}}) {
+      (void)topBar(state, 60.0);
+      CLAY({.layout = {.sizing = {.width = CLAY_SIZING_GROW(0), .height = CLAY_SIZING_GROW(0)}}}) {
+        (void)palette(state);
+        CLAY({.layout = {.sizing = {.width = CLAY_SIZING_GROW(0)}}}) {}
+        inspector(state);
+      }
+    }
     const Clay_RenderCommandArray cmds = Clay_EndLayout();
     renderClayCommands(cmds, fonts);
     EndDrawing();
@@ -88,7 +99,9 @@ int runUiShot(const std::string& outPrefix) {
     shoot(state, cam, meshes, fonts, ::Vector2{-10, -10},
           outPrefix + "_idle.png");  // pointer off-bar
     shoot(state, cam, meshes, fonts, ::Vector2{70, 18}, outPrefix + "_hover.png");  // over Save
-    std::printf("uishot: wrote %s_{idle,hover}.png\n", outPrefix.c_str());
+    shoot(state, cam, meshes, fonts, ::Vector2{120, 200},
+          outPrefix + "_palette.png");  // pointer over a module row
+    std::printf("uishot: wrote %s_{idle,hover,palette}.png\n", outPrefix.c_str());
 
     unloadUiFonts(fonts);
   }

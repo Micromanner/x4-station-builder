@@ -51,6 +51,12 @@ constexpr ::Color kCyanEdge{88, 207, 224, 255};
 constexpr ::Color kLightEdge{255, 255, 255, 26};
 constexpr ::Color kRecessed{10, 11, 14, 153};
 constexpr ::Color kShadow{0, 0, 0, 120};
+// Palette / inspector chrome fills (spec §3 / plan Global Constraints).
+constexpr ::Color kPanelFill{16, 19, 24, 214};  // translucent docked panel body
+constexpr ::Color kRowActive{30, 64, 74, 235};  // active row wash (cyan-tinted)
+constexpr ::Color kRowHover{24, 30, 37, 180};   // hovered row, subtle
+constexpr ::Color kChipFill{20, 25, 31, 220};
+constexpr ::Color kChipActiveFill{40, 96, 110, 240};
 
 void drawGlossBar(::Rectangle r) {
   DrawRectangleGradientV(static_cast<int>(r.x), static_cast<int>(r.y), static_cast<int>(r.width),
@@ -61,7 +67,16 @@ void drawGlossBar(::Rectangle r) {
 
 }  // namespace
 
+Clay_String clayStr(const char* s) {
+  return Clay_String{.isStaticallyAllocated = false,
+                     .length = static_cast<std::int32_t>(std::char_traits<char>::length(s)),
+                     .chars = s};
+}
+
+void* styleTag(StyleTag t) { return reinterpret_cast<void*>(static_cast<std::uintptr_t>(t)); }
+
 std::vector<std::uint8_t> clayInit(int width, int height, const UiFonts& fonts) {
+  Clay_SetMaxElementCount(16384);  // headroom for the palette's full module list
   const std::uint32_t size = Clay_MinMemorySize();
   std::vector<std::uint8_t> memory(size);
   Clay_Arena arena = Clay_CreateArenaWithCapacityAndMemory(size, memory.data());
@@ -83,12 +98,26 @@ void renderClayCommands(const Clay_RenderCommandArray& commands, const UiFonts& 
         const auto tag = static_cast<StyleTag>(reinterpret_cast<std::uintptr_t>(cmd->userData));
         if (tag == StyleTag::GlossBar) {
           DrawRectangle(static_cast<int>(r.x + 3), static_cast<int>(r.y + 3),
-                        static_cast<int>(r.width), static_cast<int>(r.height),
-                        kShadow);  // drop shadow
+                        static_cast<int>(r.width), static_cast<int>(r.height), kShadow);
           drawGlossBar(r);
         } else if (tag == StyleTag::Recessed) {
           DrawRectangleRec(r, kRecessed);
           DrawRectangleLinesEx(r, 1.0f, kLightEdge);
+        } else if (tag == StyleTag::Panel) {
+          DrawRectangleRec(r, kPanelFill);
+          DrawRectangleLinesEx(r, 1.0f, kLightEdge);
+        } else if (tag == StyleTag::ListRowActive) {
+          DrawRectangleRec(r, kRowActive);
+          DrawRectangle(static_cast<int>(r.x), static_cast<int>(r.y), 3, static_cast<int>(r.height),
+                        kCyanEdge);  // left accent bar
+        } else if (tag == StyleTag::ListRow) {
+          DrawRectangleRec(r, kRowHover);
+        } else if (tag == StyleTag::Chip) {
+          DrawRectangleRec(r, kChipFill);
+          DrawRectangleLinesEx(r, 1.0f, kLightEdge);
+        } else if (tag == StyleTag::ChipActive) {
+          DrawRectangleRec(r, kChipActiveFill);
+          DrawRectangleLinesEx(r, 1.0f, kCyanEdge);
         } else {
           DrawRectangleRec(r, toRlColor(cmd->renderData.rectangle.backgroundColor));
         }

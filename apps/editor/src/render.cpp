@@ -5,6 +5,7 @@
 #include "profiling.hpp"
 #include "raylib_convert.hpp"
 #include "rlgl.h"
+#include "ui_category.hpp"  // categoryLabel (shared with the Clay chrome)
 #include "x4sb/data/types.hpp"
 #include "x4sb/editorcore/display_flip.hpp"
 #include "x4sb/editorcore/gizmo.hpp"
@@ -35,26 +36,6 @@ bool pointIsLinked(const PlacedModule& m, const std::string& pointId) {
 bool meshRefIsStructural(const std::string& gltfPath) {
   const std::size_t sep = gltfPath.rfind("__");
   return sep != std::string::npos && gltfPath.compare(sep + 2, 4, "part") == 0;
-}
-
-const char* categoryName(Category c) {
-  switch (c) {
-    case Category::Production:
-      return "Production";
-    case Category::Storage:
-      return "Storage";
-    case Category::Habitat:
-      return "Habitat";
-    case Category::Dock:
-      return "Dock";
-    case Category::Defense:
-      return "Defense";
-    case Category::Connector:
-      return "Connector";
-    case Category::Other:
-      return "Other";
-  }
-  return "?";
 }
 
 // Opaque so a distant module collapsed to its box still reads against the dark
@@ -935,7 +916,7 @@ void drawHud(const EditorState& state, int /*screenWidth*/, int /*screenHeight*/
     DrawText("SELECT  (Tab to build)  -  click a placed module to select it", 12, 10, 20, GOLD);
   }
 
-  const char* filt = state.filter().has_value() ? categoryName(*state.filter()) : "All";
+  const char* filt = state.filter().has_value() ? categoryLabel(*state.filter()) : "All";
   std::snprintf(line, sizeof(line), "Filter: %s    %zu/%zu", filt,
                 def != nullptr ? state.activeIndex() + 1 : 0, state.activeCount());
   DrawText(line, 12, 34, 18, SKYBLUE);

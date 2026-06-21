@@ -15,7 +15,9 @@ class OrbitCamera {
   // `zoomFocus` is the display-space scene point under the cursor (shell hit-test):
   // the wheel dollies toward it; nullopt (empty space) is a plain dolly that leaves
   // the pivot put, so scrolling over the void no longer drifts the view.
-  void update(std::optional<Vec3> zoomFocus = std::nullopt);
+  // `allowWheel` false suppresses the wheel-zoom branch (e.g. the pointer is over a
+  // UI panel that consumes the wheel for scrolling); pan/fly are unaffected.
+  void update(std::optional<Vec3> zoomFocus = std::nullopt, bool allowWheel = true);
   // Recenter on `target` and frame a sphere of the given radius.
   void frame(::Vector3 target, float radius);
   [[nodiscard]] const ::Camera3D& camera() const { return cam_; }

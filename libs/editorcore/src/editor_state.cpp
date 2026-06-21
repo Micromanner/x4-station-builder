@@ -66,29 +66,30 @@ const ConnectorGrid& EditorState::connectorGrid() const {
   return *connectorGrid_;
 }
 
-std::vector<std::string> EditorState::filteredOrder() const {
-  if (!filter_) return order_;
-  std::vector<std::string> out;
+const std::vector<const ModuleDef*>& EditorState::filteredView() const {
+  if (filteredViewCache_) return *filteredViewCache_;
+  std::vector<const ModuleDef*> defs;
+  defs.reserve(order_.size());
   for (const auto& id : order_) {
     const ModuleDef* d = catalog_.find(id);
-    if (d != nullptr && d->category == *filter_) out.push_back(id);
+    if (d != nullptr && (!filter_ || d->category == *filter_)) defs.push_back(d);
   }
-  return out;
+  filteredViewCache_ = std::move(defs);
+  return *filteredViewCache_;
 }
 
 const ModuleDef* EditorState::activeDef() const {
-  const std::vector<std::string> view = filteredOrder();
+  const std::vector<const ModuleDef*>& view = filteredView();
   if (view.empty()) return nullptr;
-  const std::size_t idx = activeIndex_ < view.size() ? activeIndex_ : 0;
-  return catalog_.find(view[idx]);
+  return view[activeIndex_ < view.size() ? activeIndex_ : 0];
 }
 
-std::size_t EditorState::activeCount() const { return filteredOrder().size(); }
+std::size_t EditorState::activeCount() const { return filteredView().size(); }
 
 const ModuleDef* EditorState::defFor(const std::string& id) const { return catalog_.find(id); }
 
 void EditorState::cycleActive(int delta) {
-  const std::size_t n = filteredOrder().size();
+  const std::size_t n = filteredView().size();
   if (n == 0) {
     activeIndex_ = 0;
     return;
@@ -102,6 +103,11 @@ void EditorState::cycleActive(int delta) {
 void EditorState::setFilter(std::optional<Category> cat) {
   filter_ = cat;
   activeIndex_ = 0;
+  filteredViewCache_.reset();  // filter changed -> rebuild the view on next read
+}
+
+void EditorState::setActiveIndex(std::size_t index) {
+  if (index < filteredView().size()) activeIndex_ = index;
 }
 
 bool EditorState::placementClear(const ModuleDef& def, const Transform& xf, InstanceId ignoreA,

@@ -24,7 +24,7 @@ OrbitCamera::OrbitCamera() {
   rebuild();
 }
 
-void OrbitCamera::update(std::optional<Vec3> zoomFocus) {
+void OrbitCamera::update(std::optional<Vec3> zoomFocus, bool allowWheel) {
   // Net keyboard fly/yaw, Ctrl-guarded in one place (known-issues 3.10) so Ctrl
   // chords (save/load/undo) never also drift or turn the view.
   const bool ctrl = isCtrlDown();
@@ -46,7 +46,7 @@ void OrbitCamera::update(std::optional<Vec3> zoomFocus) {
   rebuild();  // refresh cam_ so the pan/zoom/fly gestures use this frame's pose
 
   const bool panning = IsMouseButtonDown(MOUSE_BUTTON_MIDDLE);
-  const float wheel = GetMouseWheelMove();
+  const float wheel = allowWheel ? GetMouseWheelMove() : 0.0f;
   const bool flying = fly.forward != 0.0 || fly.strafe != 0.0 || fly.rise != 0.0;
   if (!panning && wheel == 0.0f && !flying) return;  // no movable-pivot gesture this frame
 

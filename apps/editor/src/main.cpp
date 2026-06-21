@@ -22,6 +22,8 @@
 #include "render.hpp"
 #include "snaptest.hpp"
 #include "ui_fonts.hpp"
+#include "ui_inspector.hpp"
+#include "ui_palette.hpp"
 #include "ui_topbar.hpp"
 #include "uishot.hpp"
 #include "x4sb/data/catalog.hpp"
@@ -175,12 +177,27 @@ int main(int argc, char** argv) {
     while (!WindowShouldClose()) {
       {
         ZoneScopedN("input+update");
+        // Panel-aware UI capture: pointer over the top bar OR either side panel.
+        // Computed before cam.update so the wheel can be routed (palette scroll vs
+        // scene zoom) and a click over a panel doesn't also place/select in 3D.
+        const float barH = x4sb::editor::topBarHeight();
+        const float palW = x4sb::editor::paletteWidth();
+        const float insW = x4sb::editor::inspectorWidth();
+        const float mx = static_cast<float>(GetMouseX());
+        const float my = static_cast<float>(GetMouseY());
+        const float screenW = static_cast<float>(GetScreenWidth());
+        const bool overBar = my < barH;
+        const bool overPalette = !overBar && mx < palW;
+        const bool overInspector = !overBar && mx >= screenW - insW;
+        const bool pointerOnUi = overBar || overPalette || overInspector;
+
         // Zoom toward the scene point under the cursor (plain dolly over empty
-        // space); the hit-test runs only on wheel frames.
+        // space); the hit-test runs only on wheel frames. Over the palette the wheel
+        // scrolls the list instead, so suppress camera zoom there.
         std::optional<x4sb::Vec3> zoomFocus;
-        if (GetMouseWheelMove() != 0.0f)
+        if (!overPalette && GetMouseWheelMove() != 0.0f)
           zoomFocus = x4sb::editor::zoomFocusUnderCursor(state, cam.camera());
-        cam.update(zoomFocus);
+        cam.update(zoomFocus, /*allowWheel=*/!overPalette);
         x4sb::editor::handleKeys(state);
         // Re-baseline the free-place standoff when Tab enters build mode, so a fresh
         // ghost sits at the current view depth (handleKeys already toggled the mode).
@@ -214,15 +231,14 @@ int main(int argc, char** argv) {
         }
 
         // Feed Clay this frame's viewport + pointer, then suppress the 3D mouse when
-        // the pointer is over the bar so a button click doesn't also place/select in
-        // the scene. topBarHeight() is the correct capture test while the bar is
-        // full-width.
-        const bool pointerOnUi = static_cast<float>(GetMouseY()) < x4sb::editor::topBarHeight();
+        // the pointer is over any panel so a button/list click doesn't also place or
+        // select in the scene.
         Clay_SetLayoutDimensions(Clay_Dimensions{static_cast<float>(GetScreenWidth()),
                                                  static_cast<float>(GetScreenHeight())});
-        Clay_SetPointerState(
-            Clay_Vector2{static_cast<float>(GetMouseX()), static_cast<float>(GetMouseY())},
-            IsMouseButtonDown(MOUSE_BUTTON_LEFT));
+        Clay_SetPointerState(Clay_Vector2{mx, my}, IsMouseButtonDown(MOUSE_BUTTON_LEFT));
+        // Feed the wheel to Clay's scroll containers only when over the palette.
+        const float wheel = overPalette ? GetMouseWheelMove() : 0.0f;
+        Clay_UpdateScrollContainers(false, Clay_Vector2{0.0f, wheel * 30.0f}, GetFrameTime());
         if (!pointerOnUi) x4sb::editor::handleMouse(state, cam.camera());
       }
 
@@ -230,10 +246,25 @@ int main(int argc, char** argv) {
       ClearBackground(::Color{30, 30, 38, 255});
       x4sb::editor::drawScene(state, cam.camera(), meshes, showGizmos, showMeshes, lodEnabled);
       x4sb::editor::drawHud(state, GetScreenWidth(), GetScreenHeight(), showGizmos);
-      // Top bar drawn over the HUD so it sits on top. The action is dispatched right
-      // after EndDrawing (mutating state for next frame is fine).
+      // Chrome drawn over the HUD so it sits on top. Actions are dispatched right
+      // after EndDrawing (mutating state for next frame is fine). The ChromeRoot and
+      // the middle spacer carry no backgroundColor (alpha 0 -> no RECTANGLE emitted),
+      // so the 3D scene shows through between the side panels.
       Clay_BeginLayout();
-      const x4sb::editor::TopBarAction action = x4sb::editor::topBar(state, GetFPS());
+      x4sb::editor::TopBarAction action = x4sb::editor::TopBarAction::None;
+      x4sb::editor::PaletteAction palAction;
+      CLAY({.id = CLAY_ID("ChromeRoot"),
+            .layout = {.sizing = {.width = CLAY_SIZING_GROW(0), .height = CLAY_SIZING_GROW(0)},
+                       .layoutDirection = CLAY_TOP_TO_BOTTOM}}) {
+        action = x4sb::editor::topBar(state, GetFPS());
+        // Middle row: palette | transparent spacer (3D shows through) | inspector.
+        CLAY(
+            {.layout = {.sizing = {.width = CLAY_SIZING_GROW(0), .height = CLAY_SIZING_GROW(0)}}}) {
+          palAction = x4sb::editor::palette(state);
+          CLAY({.layout = {.sizing = {.width = CLAY_SIZING_GROW(0)}}}) {}  // spacer
+          x4sb::editor::inspector(state);
+        }
+      }
       const Clay_RenderCommandArray uiCmds = Clay_EndLayout();
       x4sb::editor::renderClayCommands(uiCmds, uiFonts);
       if (GetTime() < toastUntil) x4sb::editor::drawToast(toast, GetScreenHeight());
@@ -257,6 +288,20 @@ int main(int argc, char** argv) {
           if (state.canRedo()) state.redo();
           break;
         case x4sb::editor::TopBarAction::None:
+          break;
+      }
+
+      switch (palAction.kind) {
+        case x4sb::editor::PaletteActionKind::SetFilter:
+          state.setFilter(palAction.category);
+          break;
+        case x4sb::editor::PaletteActionKind::ClearFilter:
+          state.setFilter(std::nullopt);
+          break;
+        case x4sb::editor::PaletteActionKind::SetActive:
+          state.setActiveIndex(palAction.index);
+          break;
+        case x4sb::editor::PaletteActionKind::None:
           break;
       }
     }

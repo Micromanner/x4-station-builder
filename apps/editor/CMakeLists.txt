@@ -23,6 +23,8 @@ add_executable(x4sb-editor
   src/clay_impl.c
   src/clay_raylib.cpp
   src/ui_topbar.cpp
+  src/ui_palette.cpp
+  src/ui_inspector.cpp
   src/uishot.cpp)
 
 # SYSTEM so the first-party -Werror harness ignores warnings from the raygui header.
