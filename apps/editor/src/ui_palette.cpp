@@ -210,24 +210,97 @@ PaletteAction palette(const EditorState& state) {
         CLAY_TEXT(clayStr(totalLine),
                   CLAY_TEXT_CONFIG({.textColor = kValue,
                                     .fontId = static_cast<std::uint16_t>(FontId::Value),
-                                    .fontSize = 14,
+                                    .fontSize = 13,
                                     .letterSpacing = 0}));
         CLAY({.layout = {.sizing = {.width = CLAY_SIZING_GROW(0)}}}) {}  // spacer
+
+        const std::string currentFaction = state.faction();
+        const char* factionLabel =
+            currentFaction.empty()
+                ? "Auto"
+                : (currentFaction == "arg"
+                       ? "ARG"
+                       : (currentFaction == "bor"
+                              ? "BOR"
+                              : (currentFaction == "ter"
+                                     ? "TER"
+                                     : (currentFaction == "tel"
+                                            ? "TEL"
+                                            : (currentFaction == "par"
+                                                   ? "PAR"
+                                                   : (currentFaction == "spl" ? "SPL"
+                                                                              : "Auto"))))));
+
+        const Clay_ElementId factionId = CLAY_ID("CartFaction");
+        const bool factionHovered = Clay_PointerOver(factionId);
+        if (factionHovered && IsMouseButtonReleased(MOUSE_BUTTON_LEFT)) {
+          action.kind = PaletteActionKind::SetFaction;
+          if (currentFaction.empty())
+            action.faction = "arg";
+          else if (currentFaction == "arg")
+            action.faction = "bor";
+          else if (currentFaction == "bor")
+            action.faction = "ter";
+          else if (currentFaction == "ter")
+            action.faction = "tel";
+          else if (currentFaction == "tel")
+            action.faction = "par";
+          else if (currentFaction == "par")
+            action.faction = "spl";
+          else
+            action.faction = "";  // wrap to Auto
+        }
+        CLAY({.id = factionId,
+              .layout = {.sizing = {.width = CLAY_SIZING_FIXED(56)},
+                         .padding = {6, 6, 4, 4},
+                         .childAlignment = {.x = CLAY_ALIGN_X_CENTER}},
+              .backgroundColor = kStyledGate,
+              .userData = styleTag(factionHovered ? StyleTag::ChipActive : StyleTag::Chip)}) {
+          CLAY_TEXT(clayStr(factionLabel),
+                    CLAY_TEXT_CONFIG({.textColor = factionHovered ? kAmber : kValue,
+                                      .fontId = static_cast<std::uint16_t>(FontId::Value),
+                                      .fontSize = 13,
+                                      .letterSpacing = 0}));
+        }
+
+        // Auto-layout seed selector RETIRED (2026-07-03): Organic is the standard mode now
+        // that it beats Fishbone on connectors and passes the real-catalog sweep; Fishbone
+        // stays in the engine (layoutlab --mode fishbone) as the A/B baseline. Re-enable this
+        // chip if a second user-facing mode ever returns.
+        // const char* modeLabel =
+        //     state.layoutMode() == LayoutMode::Organic ? "Organic" : "Fishbone";
+        // const Clay_ElementId modeId = CLAY_ID("CartMode");
+        // const bool modeHovered = Clay_PointerOver(modeId);
+        // if (modeHovered && IsMouseButtonReleased(MOUSE_BUTTON_LEFT))
+        //   action.kind = PaletteActionKind::CycleMode;
+        // CLAY({.id = modeId,
+        //       .layout = {.sizing = {.width = CLAY_SIZING_FIXED(72)},
+        //                  .padding = {6, 6, 4, 4},
+        //                  .childAlignment = {.x = CLAY_ALIGN_X_CENTER}},
+        //       .backgroundColor = kStyledGate,
+        //       .userData = styleTag(modeHovered ? StyleTag::ChipActive : StyleTag::Chip)}) {
+        //   CLAY_TEXT(clayStr(modeLabel),
+        //             CLAY_TEXT_CONFIG({.textColor = modeHovered ? kAmber : kValue,
+        //                               .fontId = static_cast<std::uint16_t>(FontId::Value),
+        //                               .fontSize = 13,
+        //                               .letterSpacing = 0}));
+        // }
+
         const bool canBuild = cartTotal > 0;
         const Clay_ElementId buildId = CLAY_ID("CartBuild");
         const bool hovered = Clay_PointerOver(buildId);
         if (canBuild && hovered && IsMouseButtonReleased(MOUSE_BUTTON_LEFT))
           action.kind = PaletteActionKind::Build;
         CLAY({.id = buildId,
-              .layout = {.sizing = {.width = CLAY_SIZING_FIXED(64)},
-                         .padding = {8, 8, 4, 4},
+              .layout = {.sizing = {.width = CLAY_SIZING_FIXED(56)},
+                         .padding = {6, 6, 4, 4},
                          .childAlignment = {.x = CLAY_ALIGN_X_CENTER}},
               .backgroundColor = kStyledGate,
               .userData = styleTag(canBuild ? StyleTag::ChipActive : StyleTag::Chip)}) {
           CLAY_TEXT(clayStr("Build"),
                     CLAY_TEXT_CONFIG({.textColor = canBuild ? (hovered ? kAmber : kValue) : kLabel,
                                       .fontId = static_cast<std::uint16_t>(FontId::Value),
-                                      .fontSize = 14,
+                                      .fontSize = 13,
                                       .letterSpacing = 1}));
         }
       }

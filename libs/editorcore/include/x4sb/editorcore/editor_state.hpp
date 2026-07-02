@@ -130,6 +130,19 @@ class EditorState {
   [[nodiscard]] int cartTotal() const;
   [[nodiscard]] std::string cartSummary() const;
   AutoLayoutReport runAutoLayout();
+  AutoLayoutReport runAutoLayoutShuffle();
+
+  void setFaction(std::string faction) { faction_ = std::move(faction); }
+  [[nodiscard]] const std::string& faction() const { return faction_; }
+
+  // Auto-layout seed selection (spec §9.1): Organic (the standard mode) vs Fishbone (the
+  // engine-side A/B baseline; its UI selector chip is retired). cycle remains for a future
+  // selector; the engine reads layoutMode_ via opts.mode on every run, additive included.
+  void setLayoutMode(LayoutMode mode) { layoutMode_ = mode; }
+  void cycleLayoutMode() {
+    layoutMode_ = layoutMode_ == LayoutMode::Fishbone ? LayoutMode::Organic : LayoutMode::Fishbone;
+  }
+  [[nodiscard]] LayoutMode layoutMode() const { return layoutMode_; }
 
   void setAutoBuildMode(bool on) { autoBuildMode_ = on; }
   void toggleAutoBuildMode() { autoBuildMode_ = !autoBuildMode_; }
@@ -216,6 +229,8 @@ class EditorState {
   bool allowOverlap_{false};      // false = block overlap (mirrors X4's editor default)
   bool showAllClearance_{false};  // render-only: draw every dock's corridor when true
   bool autoBuildMode_{false};     // step-6: palette shows per-row counts + steppers when true
+  std::string faction_;           // chosen faction preference (empty is Auto)
+  LayoutMode layoutMode_ = LayoutMode::Organic;  // Organic is the standard mode (2026-07-03)
 
   mutable std::optional<ConnectorGrid> connectorGrid_;  // built lazily by connectorGrid()
   mutable bool gridDirty_{true};                        // true => rebuild on next access

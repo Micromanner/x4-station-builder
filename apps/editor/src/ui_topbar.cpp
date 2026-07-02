@@ -86,6 +86,7 @@ TopBarAction topBar(const EditorState& state, double fps) {
     button("BtnSave", "Save", true, TopBarAction::Save, clicked);
     button("BtnUndo", "Undo", state.canUndo(), TopBarAction::Undo, clicked);
     button("BtnRedo", "Redo", state.canRedo(), TopBarAction::Redo, clicked);
+    button("BtnShuffle", "Shuffle", true, TopBarAction::Shuffle, clicked);
     // Spacer pushes the readouts toward the right.
     CLAY({.layout = {.sizing = {.width = CLAY_SIZING_GROW(0)}}}) {}
     readout("Plot: 20x20x20 km");

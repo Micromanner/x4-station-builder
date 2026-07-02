@@ -2,7 +2,9 @@
 
 #include "x4sb/document/commands.hpp"
 
+#include <cmath>
 #include <memory>
+#include <string_view>
 
 namespace x4sb {
 namespace {
@@ -18,6 +20,17 @@ Obb worldObb(const ClearanceVolume& v, const Transform& xf) {
   return Obb{apply(xf, v.center), xf.rotation * v.rotation, v.halfExtents};
 }
 
+// A module's body as an oriented box in world space: its local AABB carried rigidly
+// by the placement transform. The narrow-phase counterpart of worldAabb — tighter,
+// because it does not inflate a rotated box by up to sqrt(2)x (spec §6).
+Obb worldBodyObb(const AABB& local, const Transform& xf) {
+  const Vec3 center{(local.min.x + local.max.x) * 0.5, (local.min.y + local.max.y) * 0.5,
+                    (local.min.z + local.max.z) * 0.5};
+  const Vec3 half{(local.max.x - local.min.x) * 0.5, (local.max.y - local.min.y) * 0.5,
+                  (local.max.z - local.min.z) * 0.5};
+  return Obb{apply(xf, center), xf.rotation, half};
+}
+
 // Connector mate convention (spec §3.1 — CONFIRMED against real install assets via the
 // editor's --snaptest harness: two struct_arg_cross_01 hubs mate into a clean,
 // non-overlapping joint with coincident connectors and opposing normals, meshes aligned
@@ -28,12 +41,34 @@ Obb worldObb(const ClearanceVolume& v, const Transform& xf) {
 // kMate here (and the tests' axis literals + render.cpp's connector-normal axis).
 const Quat kMate{0.0, 0.0, 1.0, 0.0};  // 180deg about local Y (validated)
 
+// True if the whitespace-separated tag string contains the exact token.
+bool hasTag(std::string_view tags, std::string_view token) {
+  std::size_t i = 0;
+  while (i <= tags.size()) {
+    const std::size_t e = tags.find(' ', i);
+    const std::string_view t =
+        tags.substr(i, e == std::string_view::npos ? std::string_view::npos : e - i);
+    if (t == token) return true;
+    if (e == std::string_view::npos) break;
+    i = e + 1;
+  }
+  return false;
+}
+
 }  // namespace
 
-// Compatible if either side is untagged, or the tags match. The real compatibility
-// rule comes from the component XML (spec §5/§10.3).
+// Token-based, calibrated against real construction plans (in-game ground truth, 2026-07-03):
+// the game links "snap" to "snap snap_aligned" (user plans: vertical structs onto crosses,
+// piers, habitats) and to "snap ter_energycells" (vanilla ter_solarpowerplant plan), so
+// auxiliary tags do NOT gate mating — exact-string equality made those module classes
+// unplaceable (known-issues 4.3). "venture" stays discriminating BOTH ways: no vanilla plan
+// mates venture to plain snap, and loosening it re-opens the venture-trap (venturer hubs
+// synthesized as hosts that nothing in-game accepts). Empty stays a wildcard for synthetic
+// fixtures — every real catalog port carries "snap" (isSnapConnection filters on it).
 bool connectorsCompatible(const ConnectionPoint& a, const ConnectionPoint& b) {
-  return a.type.empty() || b.type.empty() || a.type == b.type;
+  if (a.type.empty() || b.type.empty()) return true;
+  return hasTag(a.type, "snap") && hasTag(b.type, "snap") &&
+         hasTag(a.type, "venture") == hasTag(b.type, "venture");
 }
 
 bool connectorIsLinked(const PlacedModule& m, const std::string& pointId) {
@@ -44,7 +79,8 @@ bool connectorIsLinked(const PlacedModule& m, const std::string& pointId) {
 
 Transform computeSnapTransform(const Station& station, const ModuleCatalog& catalog,
                                InstanceId targetInstanceId, const std::string& targetPointId,
-                               const ModuleDef& newDef, const std::string& newPointId) {
+                               const ModuleDef& newDef, const std::string& newPointId,
+                               double clockingRad) {
   Transform out;
   const PlacedModule* target = station.find(targetInstanceId);
   if (!target) return out;
@@ -58,11 +94,49 @@ Transform computeSnapTransform(const Station& station, const ModuleCatalog& cata
   // world frame composed with the 180deg mate, so the two normals oppose. Then
   // translate so the connector points coincide.
   const Quat targetFrame = target->worldTransform.rotation * tp->localRotation;
-  out.rotation = targetFrame * kMate * conjugate(np->localRotation);
+  // Insert a roll about the connector's local +Z normal between the target frame and
+  // kMate: it rotates the new module around the shared axis without disturbing the
+  // coincident point or the opposing-normals invariant. clockingRad = 0 -> kMate alone.
+  const Quat roll = axisAngle(Vec3{0, 0, 1}, clockingRad);
+  out.rotation = targetFrame * roll * kMate * conjugate(np->localRotation);
 
   const Vec3 targetWorld = apply(target->worldTransform, tp->localPosition);
   out.position = targetWorld - rotate(out.rotation, np->localPosition);
   return out;
+}
+
+std::optional<MateChoice> chooseMate(const Station& station, const ModuleCatalog& catalog,
+                                     InstanceId targetInstanceId, const std::string& targetPointId,
+                                     const ModuleDef& newDef, const Quat& desiredWorldRot) {
+  const PlacedModule* target = station.find(targetInstanceId);
+  if (!target) return std::nullopt;
+  const ModuleDef* targetDef = catalog.find(target->defId);
+  if (!targetDef) return std::nullopt;
+  const ConnectionPoint* tp = findPoint(*targetDef, targetPointId);
+  if (!tp) return std::nullopt;
+
+  const Quat targetFrame = target->worldTransform.rotation * tp->localRotation;
+  const Vec3 normal = rotate(targetFrame, Vec3{0, 0, 1});  // shared connector world axis
+
+  std::optional<MateChoice> best;
+  double bestErr = 0.0;
+  for (const ConnectionPoint& np : newDef.connectionPoints) {
+    if (!connectorsCompatible(*tp, np)) continue;
+    const Transform base =
+        computeSnapTransform(station, catalog, targetInstanceId, targetPointId, newDef, np.id, 0.0);
+    const double clocking = twistAngle(desiredWorldRot * conjugate(base.rotation), normal);
+    const Transform xf = computeSnapTransform(station, catalog, targetInstanceId, targetPointId,
+                                              newDef, np.id, clocking);
+    const Quat& r = xf.rotation;
+    const double d = std::abs(r.w * desiredWorldRot.w + r.x * desiredWorldRot.x +
+                              r.y * desiredWorldRot.y + r.z * desiredWorldRot.z);
+    const double err = 1.0 - d;            // 0 == exact match
+    if (!best || err < bestErr - 1e-12) {  // strict improvement -> ties keep lower index
+      best = MateChoice{np.id, clocking, xf};
+      bestErr = err;
+    }
+  }
+  return best;
 }
 
 std::optional<SnapCandidate> findSnapCandidate(const ModuleDef& newDef, Vec3 cursorWorldPos,
@@ -176,11 +250,19 @@ std::optional<SnapCandidate> findSnapCandidate(const ModuleDef& newDef, Vec3 que
 bool collidesWithStation(const ModuleDef& def, const Transform& worldTransform, InstanceId ignoreA,
                          InstanceId ignoreB, const Station& station, const ModuleCatalog& catalog) {
   const AABB a = worldAabb(def.aabb, worldTransform);
+  const Obb aObb = worldBodyObb(def.aabb, worldTransform);
   for (const auto& placed : station.modules()) {
     if (placed.instanceId == ignoreA || placed.instanceId == ignoreB) continue;
     const ModuleDef* other = catalog.find(placed.defId);
     if (!other) continue;
-    if (overlaps(a, worldAabb(other->aabb, placed.worldTransform))) return true;
+    // Broad phase: cheap conservative AABB reject. If the inflated hulls miss, the
+    // tight bodies certainly miss, so the narrow phase is unnecessary (keeps the snap
+    // hot path fast).
+    if (!overlaps(a, worldAabb(other->aabb, placed.worldTransform))) continue;
+    // Narrow phase: OBB-precise (spec §6). Removes the false overlaps that the
+    // sqrt(2)-inflated AABBs of rotated neighbours produce, so auto-layout can pack
+    // modules tightly around a hub's side ports instead of spawning extra hubs.
+    if (overlapsObbObb(aObb, worldBodyObb(other->aabb, placed.worldTransform))) return true;
   }
   return false;
 }
@@ -248,6 +330,19 @@ std::unique_ptr<Command> makeSnapPlacement(const ModuleDef& newDef, Vec3 cursorW
   return std::make_unique<PlaceModuleCommand>(
       newDef.id, xf, cand->instanceId, cand->newPointId,
       cand->targetPointId);  // (..., newPointId, targetPointId)
+}
+
+RollResult rollAboutConnector(const Transform& startTransform, Vec3 gizmoAxisWorld, double radians,
+                              Vec3 connectorWorldPos, bool hasSingleJoint) {
+  // A singly-connected module pivots about its connector point for any axis, so the joint
+  // point stays fixed and the body hinges around where it's attached (stays mated). Zero or
+  // 2+ joints have no single pivot, so they free-rotate about the start position (detach).
+  if (hasSingleJoint) {
+    return {rotateAbout(startTransform, connectorWorldPos, gizmoAxisWorld, radians), true};
+  }
+  Transform freePose = startTransform;
+  freePose.rotation = axisAngle(gizmoAxisWorld, radians) * startTransform.rotation;
+  return {freePose, false};
 }
 
 }  // namespace x4sb

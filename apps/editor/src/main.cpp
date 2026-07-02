@@ -178,8 +178,13 @@ int main(int argc, char** argv) {
     // one undoable layout + a report toast + warming the new modules' meshes.
     const auto runBuild = [&]() {
       const x4sb::AutoLayoutReport rep = state.runAutoLayout();
-      setToast("auto-layout: snapped " + std::to_string(rep.snapped) + ", floating " +
-               std::to_string(rep.floating) + ", skipped " + std::to_string(rep.skipped));
+      const char* modeName =
+          state.layoutMode() == x4sb::LayoutMode::Organic ? "Organic" : "Fishbone";
+      std::string label = std::string(modeName) + ": snapped " + std::to_string(rep.snapped) +
+                          ", floating " + std::to_string(rep.floating) + ", skipped " +
+                          std::to_string(rep.skipped);
+      if (rep.connectorsAdded > 0) label += ", +" + std::to_string(rep.connectorsAdded) + " conn";
+      setToast(label);
       x4sb::editor::loadStationMeshes(state.station(), state.catalog(), meshes);
     };
 
@@ -290,6 +295,17 @@ int main(int argc, char** argv) {
         case x4sb::editor::TopBarAction::Redo:
           if (state.canRedo()) state.redo();
           break;
+        case x4sb::editor::TopBarAction::Shuffle: {
+          const x4sb::AutoLayoutReport rep = state.runAutoLayoutShuffle();
+          std::string label = "shuffle: snapped " + std::to_string(rep.snapped) + ", floating " +
+                              std::to_string(rep.floating) + ", skipped " +
+                              std::to_string(rep.skipped);
+          if (rep.connectorsAdded > 0)
+            label += ", +" + std::to_string(rep.connectorsAdded) + " conn";
+          setToast(label);
+          x4sb::editor::loadStationMeshes(state.station(), state.catalog(), meshes);
+          break;
+        }
         case x4sb::editor::TopBarAction::None:
           break;
       }
@@ -312,6 +328,12 @@ int main(int argc, char** argv) {
           break;
         case x4sb::editor::PaletteActionKind::Build:
           runBuild();
+          break;
+        case x4sb::editor::PaletteActionKind::SetFaction:
+          state.setFaction(palAction.faction);
+          break;
+        case x4sb::editor::PaletteActionKind::CycleMode:
+          state.cycleLayoutMode();
           break;
         case x4sb::editor::PaletteActionKind::None:
           break;

@@ -18,15 +18,18 @@ enum class PaletteActionKind {
   SetActive,
   ToggleAutoBuild,
   AdjustCart,
-  Build
+  Build,
+  SetFaction,
+  CycleMode  // cycle the auto-layout mode (Fishbone <-> Organic)
 };
 
 struct PaletteAction {
   PaletteActionKind kind{PaletteActionKind::None};
   Category category{Category::Production};  // valid when kind == SetFilter
   std::size_t index{0};                     // valid when kind == SetActive (filteredView index)
-  std::string id;  // valid when kind == AdjustCart (cart key — the module id)
-  int delta{0};    // valid when kind == AdjustCart (+/-1 or +/-10)
+  std::string id;       // valid when kind == AdjustCart (cart key — the module id)
+  int delta{0};         // valid when kind == AdjustCart (+/-1 or +/-10)
+  std::string faction;  // valid when kind == SetFaction
 };
 
 [[nodiscard]] float paletteWidth();

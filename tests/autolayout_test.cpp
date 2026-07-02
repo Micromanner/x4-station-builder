@@ -139,7 +139,7 @@ TEST_CASE("autoLayout floats a module that cannot legally snap") {
 
 TEST_CASE("autoLayout is additive: existing transforms unchanged; target only gains a link") {
   ModuleCatalog c;
-  c.add(hubDef("hub", Category::Production));
+  c.add(hubDef("hub", Category::Connector));  // a connector hub the skeleton extends from
   c.add(spokeDef("spoke", Category::Production));
   Station existing;
   PlacedModule h;
@@ -151,10 +151,11 @@ TEST_CASE("autoLayout is additive: existing transforms unchanged; target only ga
 
   REQUIRE(r.station.find(hid) != nullptr);
   CHECK(r.station.find(hid)->worldTransform.position.x == doctest::Approx(5.0));  // not moved
-  CHECK(r.station.size() == 2);
-  REQUIRE(r.placements.size() == 1);
-  CHECK(r.report.snapped == 1);
-  // The hub gained exactly one incoming link, to the newly-added spoke.
+  CHECK(r.station.size() == 4);
+  REQUIRE(r.placements.size() == 3);
+  CHECK(r.report.snapped ==
+        3);  // the spoke snapped onto the sub-spine hub
+  // The original hub gained exactly one incoming link, to the newly-added rib hub.
   REQUIRE(r.station.find(hid)->links.size() == 1);
   CHECK(r.station.find(hid)->links[0].otherInstanceId == r.placements[0].instanceId);
 }
@@ -261,4 +262,119 @@ TEST_CASE("autoLayout is deterministic") {
     CHECK(r1.placements[i].worldTransform.position.z ==
           doctest::Approx(r2.placements[i].worldTransform.position.z));
   }
+}
+
+// --- Skeleton-layout fixtures ---
+namespace {
+ModuleDef compactHub(const std::string& id) {
+  ModuleDef d;
+  d.id = id;
+  d.category = Category::Connector;
+  d.aabb = AABB{{-0.5, -0.5, -0.5}, {0.5, 0.5, 0.5}};
+  for (const auto& [pid, pos] : std::vector<std::pair<std::string, Vec3>>{
+           {"c0", {2, 0, 0}}, {"c1", {-2, 0, 0}}, {"c2", {0, 0, 2}}, {"c3", {0, 0, -2}}}) {
+    ConnectionPoint cp;
+    cp.id = pid;
+    cp.localPosition = pos;
+    cp.type = "snap";
+    d.connectionPoints.push_back(cp);
+  }
+  return d;
+}
+ModuleDef compactSpoke(const std::string& id, Category cat = Category::Production) {
+  ModuleDef d;
+  d.id = id;
+  d.category = cat;
+  d.aabb = AABB{{-0.5, -0.5, -0.5}, {0.5, 0.5, 0.5}};
+  ConnectionPoint cp;
+  cp.id = "s";
+  cp.localPosition = {0, 0, 0};
+  cp.type = "snap";
+  d.connectionPoints.push_back(cp);
+  return d;
+}
+bool noNonAdjacentOverlapCompact(const Station& s, const ModuleCatalog& c) {
+  for (const auto& m : s.modules()) {
+    const ModuleDef* dm = c.find(m.defId);
+    if (dm == nullptr) continue;
+    const AABB am = worldAabb(dm->aabb, m.worldTransform);
+    for (const auto& o : s.modules()) {
+      if (o.instanceId == m.instanceId) continue;
+      const bool linked = std::any_of(m.links.begin(), m.links.end(), [&](const Link& l) {
+        return l.otherInstanceId == o.instanceId;
+      });
+      if (linked) continue;
+      const ModuleDef* doo = c.find(o.defId);
+      if (doo == nullptr) continue;
+      if (overlaps(am, worldAabb(doo->aabb, o.worldTransform))) return false;
+    }
+  }
+  return true;
+}
+}  // namespace
+
+TEST_CASE("Compact greenfield: all interior placed, legal, connectors synthesized, deterministic") {
+  ModuleCatalog c;
+  c.add(compactHub("struct_arg_cross_01_macro"));
+  c.add(compactSpoke("prod_arg_a"));
+  Station empty;
+  const QuantityList cart{{"prod_arg_a", 4}};
+  AutoLayoutOptions opts;
+  opts.maxIters = 200;  // keep the test fast; determinism does not need many iters
+
+  const AutoLayoutResult r = autoLayout(empty, cart, c, opts);
+
+  CHECK(r.report.requested == 4);
+  CHECK(r.report.connectorsAdded >= 1);
+  CHECK(noNonAdjacentOverlapCompact(r.station, c));
+  // Every requested spoke is in the result (snapped or floating), plus the hub(s).
+  int spokes = 0;
+  for (const auto& m : r.station.modules())
+    if (m.defId == "prod_arg_a") ++spokes;
+  CHECK(spokes == 4);
+  // placements cover every added module (spokes + synthesized hubs).
+  CHECK(r.placements.size() == r.station.size());
+
+  const AutoLayoutResult r2 = autoLayout(empty, cart, c, opts);
+  REQUIRE(r.placements.size() == r2.placements.size());
+  for (std::size_t i = 0; i < r.placements.size(); ++i)
+    CHECK(r.placements[i].worldTransform.position.x ==
+          doctest::Approx(r2.placements[i].worldTransform.position.x));
+}
+
+TEST_CASE("Compact is additive: an existing module is never moved") {
+  ModuleCatalog c;
+  c.add(compactHub("struct_arg_cross_01_macro"));
+  c.add(compactSpoke("prod_arg_a"));
+  Station existing;
+  PlacedModule pre;
+  pre.defId = "struct_arg_cross_01_macro";
+  pre.worldTransform.position = {7, 0, 0};
+  const InstanceId preId = existing.add(pre);
+  AutoLayoutOptions opts;
+  opts.maxIters = 100;
+
+  const AutoLayoutResult r = autoLayout(existing, QuantityList{{"prod_arg_a", 1}}, c, opts);
+
+  REQUIRE(r.station.find(preId) != nullptr);
+  CHECK(r.station.find(preId)->worldTransform.position.x == doctest::Approx(7.0));  // untouched
+  CHECK(r.report.requested == 1);
+}
+
+TEST_CASE("Compact routes peripheral modules (a turret) to the outer hull") {
+  ModuleCatalog c;
+  c.add(compactHub("struct_arg_cross_01_macro"));
+  c.add(compactSpoke("prod_arg_a"));
+  c.add(compactSpoke("defence_arg_disc_01_macro", Category::Other));  // a turret (peripheral)
+  Station empty;
+  const QuantityList cart{{"prod_arg_a", 2}, {"defence_arg_disc_01_macro", 1}};
+  AutoLayoutOptions opts;
+  opts.maxIters = 100;
+
+  const AutoLayoutResult r = autoLayout(empty, cart, c, opts);
+  CHECK(r.report.requested == 3);
+  int turrets = 0;
+  for (const auto& m : r.station.modules())
+    if (m.defId == "defence_arg_disc_01_macro") ++turrets;
+  CHECK(turrets == 1);  // the turret was placed
 }

@@ -51,6 +51,17 @@ inline Vec3 rotate(Quat q, Vec3 v) {
   return {std::cos(half), axis.x * s, axis.y * s, axis.z * s};
 }
 
+// Signed angle (radians) of the component of `q`'s rotation about `axis` — the "twist"
+// of a swing-twist decomposition. Used to recover the clocking a desired orientation
+// implies about a connector's normal. Returns 0 for a degenerate axis.
+[[nodiscard]] inline double twistAngle(Quat q, Vec3 axis) {
+  const double len = length(axis);
+  if (len < 1e-12) return 0.0;
+  const Vec3 a{axis.x / len, axis.y / len, axis.z / len};
+  const double proj = q.x * a.x + q.y * a.y + q.z * a.z;  // (vector part) . axis
+  return 2.0 * std::atan2(proj, q.w);                     // twist quaternion = (w, proj*a)
+}
+
 // Rigid-body transform: rotate, then translate. Default is identity.
 struct Transform {
   Vec3 position{};
@@ -64,6 +75,15 @@ inline Vec3 apply(const Transform& t, Vec3 local) { return rotate(t.rotation, lo
 // apply(compose(a,b), v) == apply(a, apply(b, v)) for all v.
 [[nodiscard]] inline Transform compose(const Transform& a, const Transform& b) {
   return {apply(a, b.position), a.rotation * b.rotation};
+}
+
+// Rotate a rigid transform by `radians` about the world-space axis line through `pivot`
+// (rotation about a point, not the origin): the pivot stays fixed. Used to roll a
+// connected module about its mated connector without moving the joint.
+[[nodiscard]] inline Transform rotateAbout(const Transform& t, Vec3 pivot, Vec3 axis,
+                                           double radians) {
+  const Quat r = axisAngle(axis, radians);
+  return {pivot + rotate(r, t.position - pivot), r * t.rotation};
 }
 
 // Axis-aligned bounding box.
@@ -152,6 +172,43 @@ struct Obb {
     if (separated(L)) return false;
   for (const Vec3& A : wb)
     for (const Vec3& B : ax)
+      if (separated(cross(A, B))) return false;
+  return true;
+}
+
+// Separating-axis test of two oriented bounding boxes. True on overlap (touching
+// counts). Candidate axes: the 3 face normals of each box and the 9 edge
+// cross-products. A near-zero cross-product (near-parallel edges) is skipped — its
+// separation, if any, is already captured by a face axis. This is the OBB-precise
+// narrow phase (spec §6): unlike a worldAabb hull it does not inflate a rotated box
+// by up to sqrt(2)x, so it does not report the false overlaps that block tight
+// packing of modules rotated to face a hub's side ports.
+[[nodiscard]] inline bool overlapsObbObb(const Obb& a, const Obb& b) {
+  const std::array<Vec3, 3> ax{{rotate(a.rotation, {1, 0, 0}), rotate(a.rotation, {0, 1, 0}),
+                                rotate(a.rotation, {0, 0, 1})}};
+  const std::array<Vec3, 3> bx{{rotate(b.rotation, {1, 0, 0}), rotate(b.rotation, {0, 1, 0}),
+                                rotate(b.rotation, {0, 0, 1})}};
+  const std::array<double, 3> ae{{a.halfExtents.x, a.halfExtents.y, a.halfExtents.z}};
+  const std::array<double, 3> be{{b.halfExtents.x, b.halfExtents.y, b.halfExtents.z}};
+  const Vec3 d = b.center - a.center;  // center-to-center
+
+  // Projected radius of a box (axes + half-extents) onto axis L.
+  const auto radius = [](const Vec3& L, const std::array<Vec3, 3>& axes,
+                         const std::array<double, 3>& he) {
+    return std::abs(dot(L, axes[0])) * he[0] + std::abs(dot(L, axes[1])) * he[1] +
+           std::abs(dot(L, axes[2])) * he[2];
+  };
+  const auto separated = [&](const Vec3& L) {
+    if (dot(L, L) < 1e-12) return false;  // degenerate axis: not separating
+    return std::abs(dot(d, L)) > radius(L, ax, ae) + radius(L, bx, be);
+  };
+
+  for (const Vec3& L : ax)
+    if (separated(L)) return false;
+  for (const Vec3& L : bx)
+    if (separated(L)) return false;
+  for (const Vec3& A : ax)
+    for (const Vec3& B : bx)
       if (separated(cross(A, B))) return false;
   return true;
 }

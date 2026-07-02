@@ -25,6 +25,7 @@ build/
 out/
 bin/
 lib/
+render-worktree/
 cmake-build-*/
 CMakeCache.txt
 CMakeFiles/

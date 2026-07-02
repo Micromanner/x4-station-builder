@@ -8,6 +8,7 @@
 #include <algorithm>
 #include <cmath>
 #include <memory>
+#include <random>
 #include <string>
 #include <utility>
 #include <vector>
@@ -24,19 +25,19 @@ bool isInsidePlot(const AABB& box) {
 }
 
 Transform clampToPlot(const AABB& localAabb, Transform t) {
-  constexpr double L = 9999.0;  // 1m buffer inside the 10000.0 boundary
-  AABB rotated = worldAabb(localAabb, Transform{Vec3{0, 0, 0}, t.rotation});
+  constexpr double kLimit = 9999.0;  // 1m buffer inside the 10000.0 boundary
+  const AABB rotated = worldAabb(localAabb, Transform{Vec3{0, 0, 0}, t.rotation});
 
-  double minX = -L - rotated.min.x;
-  double maxX = L - rotated.max.x;
+  const double minX = -kLimit - rotated.min.x;
+  const double maxX = kLimit - rotated.max.x;
   if (maxX >= minX) t.position.x = std::clamp(t.position.x, minX, maxX);
 
-  double minY = -L - rotated.min.y;
-  double maxY = L - rotated.max.y;
+  const double minY = -kLimit - rotated.min.y;
+  const double maxY = kLimit - rotated.max.y;
   if (maxY >= minY) t.position.y = std::clamp(t.position.y, minY, maxY);
 
-  double minZ = -L - rotated.min.z;
-  double maxZ = L - rotated.max.z;
+  const double minZ = -kLimit - rotated.min.z;
+  const double maxZ = kLimit - rotated.max.z;
   if (maxZ >= minZ) t.position.z = std::clamp(t.position.z, minZ, maxZ);
 
   return t;
@@ -94,7 +95,7 @@ void EditorState::cycleActive(int delta) {
     activeIndex_ = 0;
     return;
   }
-  const long long m = static_cast<long long>(n);
+  const auto m = static_cast<long long>(n);
   long long i = static_cast<long long>(activeIndex_) + delta;
   i = ((i % m) + m) % m;  // signed-safe wrap into [0, n)
   activeIndex_ = static_cast<std::size_t>(i);
@@ -136,11 +137,25 @@ void EditorState::updateGhost(Vec3 rayOriginX4, Vec3 rayDirX4, bool forceFree) {
           const std::optional<SnapCandidate> cand =
               findSnapCandidate(*def, cursor, station_, catalog_, connectorGrid(), snapRadius_);
           if (cand) {
-            const Transform xf = computeSnapTransform(station_, catalog_, cand->instanceId,
-                                                      cand->targetPointId, *def, cand->newPointId);
+            const bool noRotation = std::abs(pendingRotation_.w) > 1.0 - 1e-9;
+            Transform xf;
+            std::string newPointId = cand->newPointId;
+            std::optional<MateChoice> choice;
+            if (!noRotation) {
+              choice = chooseMate(station_, catalog_, cand->instanceId, cand->targetPointId, *def,
+                                  pendingRotation_);
+            }
+            if (choice) {
+              xf = choice->xf;
+              newPointId = choice->newPointId;
+            } else {
+              xf = computeSnapTransform(station_, catalog_, cand->instanceId, cand->targetPointId,
+                                        *def, cand->newPointId);
+            }
             const AABB snapWorldBox = worldAabb(def->aabb, xf);
             const bool clear = placementClear(*def, xf, cand->instanceId, 0);
-            ghost_ = Ghost{def->id, xf, isInsidePlot(snapWorldBox) && clear, cand};
+            const SnapCandidate chosen{cand->instanceId, cand->targetPointId, newPointId};
+            ghost_ = Ghost{def->id, xf, isInsidePlot(snapWorldBox) && clear, chosen};
             return;
           }
         }
@@ -240,18 +255,48 @@ void EditorState::updateGizmoDrag(Vec3 rayOriginX4, Vec3 rayDirX4, bool forceFre
     return;
   }
 
-  // Rotation handles spin the module in place about the ring axis — no translation,
-  // no snap-on-move.
   if (gizmoIsRotation(drag_->handle)) {
     const double angle =
         gizmoDragRotation(drag_->handle, drag_->startTransform.position, drag_->startRayOrigin,
                           drag_->startRayDir, rayOriginX4, rayDirX4);
-    Transform rotated = drag_->startTransform;
-    rotated.rotation =
-        axisAngle(gizmoAxisDir(drag_->handle), angle) * drag_->startTransform.rotation;
-    rotated = clampToPlot(def->aabb, rotated);
-    drag_->snap.reset();
-    drag_->preview = rotated;
+    const Vec3 axis = gizmoAxisDir(drag_->handle);
+
+    const ConnectionPoint* cp = nullptr;
+    if (m->links.size() == 1)
+      for (const auto& c : def->connectionPoints)
+        if (c.id == m->links.front().thisPointId) cp = &c;
+
+    if (cp == nullptr) {
+      // No single joint to pivot about (free, or 2+-connected): free-rotate, detaching.
+      const RollResult roll = rollAboutConnector(drag_->startTransform, axis, angle, Vec3{}, false);
+      drag_->snap.reset();
+      drag_->preview = clampToPlot(def->aabb, roll.preview);
+      return;
+    }
+
+    // Singly-connected: pivot about the connector so the joint stays pinned and the body hinges
+    // around where it's attached (stays mated). Rotate only as far as there is clear room —
+    // advance the angle from 0 toward the target and stop at the first pose that leaves the plot
+    // or collides (ignoring the joint partner, whose body touches at the joint). The module
+    // "rotates as long as it can" and holds at the obstruction instead of spinning through it;
+    // the pose is never position-clamped, so the joint stays exactly pinned. allowOverlap_
+    // relaxes the body check via placementClear.
+    const Vec3 cpPos = apply(drag_->startTransform, cp->localPosition);
+    const InstanceId partner = m->links.front().otherInstanceId;
+    Transform preview = drag_->startTransform;
+    constexpr int kRotationSteps = 48;
+    for (int i = 1; i <= kRotationSteps; ++i) {
+      const double a = angle * (static_cast<double>(i) / kRotationSteps);
+      const Transform pose =
+          rollAboutConnector(drag_->startTransform, axis, a, cpPos, true).preview;
+      if (!isInsidePlot(worldAabb(def->aabb, pose)) ||
+          !placementClear(*def, pose, drag_->id, partner))
+        break;
+      preview = pose;
+    }
+    const Link& l = m->links.front();
+    drag_->snap = SnapCandidate{l.otherInstanceId, l.otherPointId, l.thisPointId};  // keep the link
+    drag_->preview = preview;
     return;
   }
 
@@ -270,8 +315,14 @@ void EditorState::updateGizmoDrag(Vec3 rayOriginX4, Vec3 rayDirX4, bool forceFre
                           dragSnapRadius_, drag_->id, freePose);
     if (cand) {
       drag_->snap = cand;
-      drag_->preview = computeSnapTransform(station_, catalog_, cand->instanceId,
-                                            cand->targetPointId, *def, cand->newPointId);
+      if (const auto choice = chooseMate(station_, catalog_, cand->instanceId, cand->targetPointId,
+                                         *def, drag_->preview.rotation)) {
+        drag_->snap->newPointId = choice->newPointId;
+        drag_->preview = choice->xf;
+      } else {
+        drag_->preview = computeSnapTransform(station_, catalog_, cand->instanceId,
+                                              cand->targetPointId, *def, cand->newPointId);
+      }
     }
   }
 }
@@ -377,12 +428,34 @@ bool EditorState::rotateSelected(Vec3 worldAxis) {
   if (!selected_) return false;
   const PlacedModule* m = station_.find(*selected_);
   if (m == nullptr) return false;
+  const ModuleDef* def = catalog_.find(m->defId);
+  if (def == nullptr) return false;
+
+  // A singly-connected module pivots 90deg about its connector so the joint stays pinned and
+  // the body hinges around where it's attached (stays mated) — not spinning about its own
+  // origin. Rotate only if there's room: reject the step if the body would leave the plot or
+  // collide (ignoring the joint partner, whose body touches at the joint). No position clamp,
+  // so the joint stays exactly pinned. allowOverlap_ relaxes the body check via placementClear.
+  const ConnectionPoint* cp = nullptr;
+  if (m->links.size() == 1)
+    for (const auto& c : def->connectionPoints)
+      if (c.id == m->links.front().thisPointId) cp = &c;
+  if (cp != nullptr) {
+    const Link link = m->links.front();  // copy: execute() mutates the station
+    const Vec3 cpPos = apply(m->worldTransform, cp->localPosition);
+    const Transform t = rotateAbout(m->worldTransform, cpPos, worldAxis, kHalfPi);
+    if (!isInsidePlot(worldAabb(def->aabb, t)) ||
+        !placementClear(*def, t, *selected_, link.otherInstanceId))
+      return false;  // no room to rotate
+    execute(std::make_unique<SnapMoveCommand>(*selected_, t, link.otherInstanceId, link.thisPointId,
+                                              link.otherPointId));
+    return true;
+  }
+
+  // Free or 2+-connected: rotate in place about the origin (detaching), as before.
   Transform t = m->worldTransform;
   t.rotation = axisAngle(worldAxis, kHalfPi) * t.rotation;
-  const ModuleDef* def = catalog_.find(m->defId);
-  if (def) {
-    t = clampToPlot(def->aabb, t);
-  }
+  t = clampToPlot(def->aabb, t);
   execute(std::make_unique<MoveModuleCommand>(*selected_, t));
   return true;
 }
@@ -445,9 +518,47 @@ std::string EditorState::cartSummary() const {
 }
 
 AutoLayoutReport EditorState::runAutoLayout() {
-  const AutoLayoutResult r = autoLayout(station_, cart_, catalog_);
+  AutoLayoutOptions opts;
+  opts.faction = faction_;
+  opts.mode = layoutMode_;
+  const AutoLayoutResult r = autoLayout(station_, cart_, catalog_, opts);
   std::vector<std::unique_ptr<Command>> cmds;
   cmds.reserve(r.placements.size());
+  for (const LayoutPlacement& p : r.placements) {
+    if (p.snapped)
+      cmds.push_back(std::make_unique<PlaceModuleCommand>(
+          p.defId, p.worldTransform, p.targetInstanceId, p.newPointId, p.targetPointId));
+    else
+      cmds.push_back(std::make_unique<PlaceModuleCommand>(p.defId, p.worldTransform));
+  }
+  if (!cmds.empty()) execute(std::make_unique<CompositeCommand>(std::move(cmds)));
+  cart_.clear();
+  return r.report;
+}
+
+AutoLayoutReport EditorState::runAutoLayoutShuffle() {
+  QuantityList tempCart = cart_;
+  for (const PlacedModule& pm : station_.modules()) {
+    const ModuleDef* def = catalog_.find(pm.defId);
+    if (def && def->category != Category::Connector) {
+      tempCart[pm.defId]++;
+    }
+  }
+
+  AutoLayoutOptions opts;
+  opts.shuffle = true;
+  opts.faction = faction_;
+  opts.mode = layoutMode_;
+  std::random_device rd;
+  opts.seed = rd();
+
+  const AutoLayoutResult r = autoLayout(Station{}, tempCart, catalog_, opts);
+
+  std::vector<std::unique_ptr<Command>> cmds;
+  cmds.reserve(station_.modules().size() + r.placements.size());
+  for (const PlacedModule& pm : station_.modules()) {
+    cmds.push_back(std::make_unique<DeleteModuleCommand>(pm.instanceId));
+  }
   for (const LayoutPlacement& p : r.placements) {
     if (p.snapped)
       cmds.push_back(std::make_unique<PlaceModuleCommand>(

@@ -25,7 +25,17 @@ add_executable(x4sb_tests
   catalogbuild_test.cpp
   meshconvert_test.cpp
   camera_math_test.cpp
-  autolayout_test.cpp)
+  autolayout_test.cpp
+  autolayout_roles_test.cpp
+  autolayout_connectors_test.cpp
+  autolayout_peripheral_test.cpp
+  autolayout_metrics_test.cpp
+  autolayout_search_test.cpp
+  autolayout_anneal_test.cpp
+  autolayout_objective_test.cpp
+  autolayout_moves_test.cpp
+  autolayout_serialize_test.cpp
+  autolayout_seed_test.cpp)
 
 target_link_libraries(x4sb_tests PRIVATE
   doctest::doctest

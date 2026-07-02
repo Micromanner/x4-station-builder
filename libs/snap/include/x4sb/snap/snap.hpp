@@ -19,9 +19,32 @@ namespace x4sb {
 // connectors face each other. Consequence: a directly-connected joint is
 // collision-free by construction. Returns an identity Transform if the target
 // instance or either connection point cannot be resolved.
+// `clockingRad` rolls the new module about the shared connector axis (its local +Z
+// normal); 0 reproduces the single fixed mate. The roll preserves point-coincidence
+// and opposing normals, so any clocking is a valid joint — it selects which way the
+// new module faces around the axis (e.g. the 90° turn that closes a flat ring).
 Transform computeSnapTransform(const Station& station, const ModuleCatalog& catalog,
                                InstanceId targetInstanceId, const std::string& targetPointId,
-                               const ModuleDef& newDef, const std::string& newPointId);
+                               const ModuleDef& newDef, const std::string& newPointId,
+                               double clockingRad = 0.0);
+
+// The new module's connector + clocking whose resulting orientation best matches a
+// desired world rotation, with the solved mate transform. Used to honor the user's
+// rotation when snapping (and reusable by auto-layout ring-tiling).
+struct MateChoice {
+  std::string newPointId;
+  double clockingRad{0.0};
+  Transform xf;
+};
+
+// Among newDef's connectors compatible with the target instance's `targetPointId`, the
+// (connector, clocking) whose mate orientation is nearest `desiredWorldRot`. Clocking =
+// twistAngle of (desiredWorldRot * conj(base)) about the target connector's world normal.
+// nullopt if the target/point cannot be resolved or no compatible connector exists; a
+// tie resolves to the lower connector index.
+[[nodiscard]] std::optional<MateChoice> chooseMate(
+    const Station& station, const ModuleCatalog& catalog, InstanceId targetInstanceId,
+    const std::string& targetPointId, const ModuleDef& newDef, const Quat& desiredWorldRot);
 
 // Connector-mate predicates, the single source of truth for "which connectors may
 // join" — shared by the snap search and the editor's snap guide-lines so the two
@@ -93,6 +116,21 @@ struct ClearanceHit {
                                                           InstanceId ignoreA, InstanceId ignoreB,
                                                           const Station& station,
                                                           const ModuleCatalog& catalog);
+
+// Preview pose for rolling a placed module with the rotation gizmo. If `hasSingleJoint`,
+// the module pivots about its connector point for ANY axis (the joint point stays fixed,
+// the body hinges around where it's attached) and stays mated. Otherwise it free-rotates
+// about its start position (in place, no teleport) and reports the mate broken — used for a
+// module with zero or 2+ joints (no single pivot). The caller decides how far to rotate
+// (e.g. clamping by collision); this only solves the pose.
+struct RollResult {
+  Transform preview;
+  bool mated{false};
+};
+
+[[nodiscard]] RollResult rollAboutConnector(const Transform& startTransform, Vec3 gizmoAxisWorld,
+                                            double radians, Vec3 connectorWorldPos,
+                                            bool hasSingleJoint);
 
 // Compose find -> solve -> collision-check into a ready-to-execute placement
 // command, or nullptr if there is no free compatible target in `radius` or the

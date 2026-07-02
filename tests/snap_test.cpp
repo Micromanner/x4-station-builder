@@ -8,6 +8,8 @@
 
 #include <cmath>
 #include <memory>
+#include <utility>
+#include <vector>
 
 using namespace x4sb;
 
@@ -31,6 +33,32 @@ ModuleDef makeModule(const std::string& id, Category category, const std::string
   return d;
 }
 }  // namespace
+
+TEST_CASE("connectorsCompatible: auxiliary tags do not gate mating, venture does") {
+  // Ground truth from real construction plans (2026-07-03): the game links "snap" ports to
+  // "snap snap_aligned" (user plans: vertical structs onto crosses/piers/habitats) and to
+  // "snap ter_energycells" (vanilla ter_solarpowerplant: energycells onto a plain-snap
+  // dockarea). Exact-string equality wrongly rejected those, making whole module classes
+  // unplaceable by auto-layout (known-issues 4.3). "venture" stays discriminating: no vanilla
+  // plan mates venture to plain snap, and loosening it re-opens the venture-trap.
+  const auto pt = [](const char* type) {
+    ConnectionPoint cp;
+    cp.type = type;
+    return cp;
+  };
+  CHECK(connectorsCompatible(pt("snap"), pt("snap")));
+  CHECK(connectorsCompatible(pt("snap snap_aligned"), pt("snap")));
+  CHECK(connectorsCompatible(pt("snap ter_energycells"), pt("snap")));
+  CHECK(connectorsCompatible(pt("snap snap_aligned"), pt("snap ter_energycells")));
+  CHECK(connectorsCompatible(pt("snap venture"), pt("snap venture")));
+  CHECK(connectorsCompatible(pt("snap venture"), pt("snap venture snap_aligned")));
+  CHECK_FALSE(connectorsCompatible(pt("snap venture"), pt("snap")));
+  CHECK_FALSE(connectorsCompatible(pt("snap venture snap_aligned"), pt("snap snap_aligned")));
+  // Non-snap tag strings mate nothing (a snap port never pairs a non-snap connection).
+  CHECK_FALSE(connectorsCompatible(pt("venture_only_nomatch"), pt("snap")));
+  // The empty type stays a wildcard (synthetic fixtures; catalog ports always carry "snap").
+  CHECK(connectorsCompatible(pt(""), pt("snap venture")));
+}
 
 TEST_CASE("empty station yields no candidate and no collision") {
   ModuleCatalog catalog;
@@ -106,6 +134,37 @@ TEST_CASE("collidesWithStation accounts for rotation") {
   farXf.rotation = Quat{s, 0, 0, s};
   farXf.position = {0, 100, 0};
   CHECK_FALSE(collidesWithStation(longDef, farXf, /*ignore=*/0, station, catalog));
+}
+
+TEST_CASE("collidesWithStation is OBB-precise: rotated neighbours don't falsely collide") {
+  ModuleCatalog catalog;
+  ModuleDef longDef;
+  longDef.id = "L";
+  longDef.aabb = AABB{{-5, -0.5, -0.5}, {5, 0.5, 0.5}};  // long along X
+  catalog.add(longDef);
+
+  const Quat z45 = axisAngle(Vec3{0, 0, 1}, 0.7853981633974483);  // pi/4
+  Station station;
+  PlacedModule a;
+  a.defId = "L";
+  a.worldTransform.rotation = z45;  // diagonal bar at origin
+  station.add(a);
+
+  const Vec3 perp{-std::sqrt(2.0) / 2.0, std::sqrt(2.0) / 2.0, 0};  // perp to the bar in XY
+
+  // Parallel bar, 0.5 perpendicular gap: the sqrt(2)-inflated AABB hulls overlap (the
+  // old AABB-only test rejected this and forced auto-layout to spawn another hub), but
+  // the oriented bodies are clear -> OBB narrow phase must report NO collision.
+  Transform clear;
+  clear.rotation = z45;
+  clear.position = perp * 1.5;  // perpendicular separation 1.5 > 0.5+0.5
+  CHECK_FALSE(collidesWithStation(longDef, clear, /*ignore=*/0, station, catalog));
+
+  // Slid in to a 0.5 perpendicular separation -> bodies genuinely interpenetrate.
+  Transform hit;
+  hit.rotation = z45;
+  hit.position = perp * 0.5;
+  CHECK(collidesWithStation(longDef, hit, /*ignore=*/0, station, catalog));
 }
 
 TEST_CASE("computeSnapTransform makes the connectors face opposite directions") {
@@ -541,6 +600,173 @@ TEST_CASE("violatedClearance names the dock corridors a body intrudes") {
   CHECK(violatedClearance(dock, Transform{}, dockId, 0, station, catalog).empty());
 }
 
+namespace {
+// Real Advanced Composite Production geometry (two 90°-apart snap connectors).
+ModuleDef advComposite() {
+  ModuleDef d;
+  d.id = "adv";
+  d.aabb = AABB{{-400.14731, -799.99985, -180.89929}, {379.82936, 683.47575, 183.54531}};
+  ConnectionPoint c1;
+  c1.id = "ConnectionSnap001";
+  c1.localPosition = {200.0, -800.0, 0.0};
+  c1.localRotation = {-0.7071067, -0.7071068, 0.0, 0.0};
+  c1.type = "snap";
+  ConnectionPoint c2;
+  c2.id = "ConnectionSnap002";
+  c2.localPosition = {-400.0, 600.0, 0.0};
+  c2.localRotation = {-0.7071069, -5.024295e-15, 0.7071066, -6.181723e-08};
+  c2.type = "snap";
+  d.connectionPoints = {c1, c2};
+  return d;
+}
+constexpr double kQuarterTurn = 1.5707963267948966;  // pi/2
+}  // namespace
+
+TEST_CASE("computeSnapTransform clockingRad=0 equals the no-arg baseline") {
+  ModuleCatalog catalog;
+  catalog.add(makeModule("A", "a1", {1, 0, 0}));
+  const ModuleDef b = makeModule("B", "b1", {-1, 0, 0});
+  catalog.add(b);
+  Station station;
+  PlacedModule pa;
+  pa.defId = "A";
+  const InstanceId idA = station.add(pa);
+
+  const Transform base = computeSnapTransform(station, catalog, idA, "a1", b, "b1");
+  const Transform zero = computeSnapTransform(station, catalog, idA, "a1", b, "b1", 0.0);
+  CHECK(zero.position.x == doctest::Approx(base.position.x));
+  CHECK(zero.position.y == doctest::Approx(base.position.y));
+  CHECK(zero.position.z == doctest::Approx(base.position.z));
+  CHECK(std::abs(zero.rotation.w * base.rotation.w + zero.rotation.x * base.rotation.x +
+                 zero.rotation.y * base.rotation.y + zero.rotation.z * base.rotation.z) ==
+        doctest::Approx(1.0));
+}
+
+TEST_CASE("clocking rolls about the connector axis but keeps the joint coincident") {
+  ModuleCatalog catalog;
+  const ModuleDef adv = advComposite();
+  catalog.add(adv);
+  Station station;
+  PlacedModule p0;
+  p0.defId = "adv";
+  const InstanceId id0 = station.add(p0);
+
+  const ConnectionPoint& host = adv.connectionPoints[0];  // ConnectionSnap001
+  const ConnectionPoint& newc = adv.connectionPoints[1];  // ConnectionSnap002
+  const Vec3 hostWorld = apply(station.find(id0)->worldTransform, host.localPosition);
+
+  for (const double clk : {0.0, kQuarterTurn, -kQuarterTurn}) {
+    const Transform xf = computeSnapTransform(station, catalog, id0, host.id, adv, newc.id, clk);
+    const Vec3 newWorld = apply(xf, newc.localPosition);
+    CHECK(newWorld.x == doctest::Approx(hostWorld.x));  // joint stays put under clocking
+    CHECK(newWorld.y == doctest::Approx(hostWorld.y));
+    CHECK(newWorld.z == doctest::Approx(hostWorld.z));
+  }
+}
+
+TEST_CASE("clocking -pi/2 closes a flat 4-module ring; clocking 0 worms") {
+  ModuleCatalog catalog;
+  const ModuleDef adv = advComposite();
+  catalog.add(adv);
+
+  const auto buildChain = [&](double clk) {
+    Station st;
+    PlacedModule m0;
+    m0.defId = "adv";
+    InstanceId prev = st.add(m0);
+    std::vector<InstanceId> ids{prev};
+    for (int i = 0; i < 3; ++i) {
+      const Transform xf = computeSnapTransform(st, catalog, prev, "ConnectionSnap001", adv,
+                                                "ConnectionSnap002", clk);
+      PlacedModule m;
+      m.defId = "adv";
+      m.worldTransform = xf;
+      prev = st.add(m);
+      ids.push_back(prev);
+    }
+    return std::pair<Station, std::vector<InstanceId>>{st, ids};
+  };
+
+  auto [flat, flatIds] = buildChain(-kQuarterTurn);
+  const Vec3 openA =
+      apply(flat.find(flatIds.front())->worldTransform, Vec3{-400, 600, 0});  // m0 C002
+  const Vec3 openB =
+      apply(flat.find(flatIds.back())->worldTransform, Vec3{200, -800, 0});  // m3 C001
+  CHECK(length(openA - openB) < 1.0);                                        // ring closes
+  double zMin = 1e30, zMax = -1e30;
+  for (const InstanceId id : flatIds) {
+    const double z = flat.find(id)->worldTransform.position.z;
+    zMin = std::min(zMin, z);
+    zMax = std::max(zMax, z);
+  }
+  CHECK(zMax - zMin < 1.0);  // planar
+
+  auto [worm, wormIds] = buildChain(0.0);
+  const Vec3 wA = apply(worm.find(wormIds.front())->worldTransform, Vec3{-400, 600, 0});
+  const Vec3 wB = apply(worm.find(wormIds.back())->worldTransform, Vec3{200, -800, 0});
+  CHECK(length(wA - wB) > 1000.0);  // does not close — the 3D worm
+}
+
+TEST_CASE("chooseMate recovers the clocking that reproduces a desired orientation") {
+  ModuleCatalog catalog;
+  const ModuleDef adv = advComposite();
+  catalog.add(adv);
+  Station station;
+  PlacedModule p0;
+  p0.defId = "adv";
+  const InstanceId id0 = station.add(p0);
+
+  // The flat-ring mate: host C001, new C002, clocking -pi/2. Use its orientation as
+  // the user's "desired" rotation and confirm chooseMate recovers connector + clocking.
+  const Transform flat = computeSnapTransform(station, catalog, id0, "ConnectionSnap001", adv,
+                                              "ConnectionSnap002", -kQuarterTurn);
+  const auto choice = chooseMate(station, catalog, id0, "ConnectionSnap001", adv, flat.rotation);
+  REQUIRE(choice.has_value());
+  CHECK(choice->newPointId == "ConnectionSnap002");
+  const Quat& r = choice->xf.rotation;
+  CHECK(std::abs(r.w * flat.rotation.w + r.x * flat.rotation.x + r.y * flat.rotation.y +
+                 r.z * flat.rotation.z) == doctest::Approx(1.0));
+}
+
+TEST_CASE("chooseMate breaks ties toward the lower connector index") {
+  // Two identical connectors -> identical error for any desired rotation -> first wins.
+  ModuleDef d;
+  d.id = "sym";
+  ConnectionPoint a;
+  a.id = "first";
+  a.localPosition = {1, 0, 0};
+  ConnectionPoint b;
+  b.id = "second";
+  b.localPosition = {1, 0, 0};
+  d.connectionPoints = {a, b};
+  ModuleCatalog catalog;
+  catalog.add(makeModule("H", "h1", {0, 0, 0}));
+  catalog.add(d);
+  Station station;
+  PlacedModule ph;
+  ph.defId = "H";
+  const InstanceId idH = station.add(ph);
+
+  const auto choice = chooseMate(station, catalog, idH, "h1", d, Quat{});
+  REQUIRE(choice.has_value());
+  CHECK(choice->newPointId == "first");
+}
+
+TEST_CASE("chooseMate returns nullopt when nothing is compatible") {
+  ModuleCatalog catalog;
+  ModuleDef host = makeModule("H", "h1", {0, 0, 0});
+  host.connectionPoints[0].type = "tagA";
+  catalog.add(host);
+  ModuleDef other = makeModule("O", "o1", {0, 0, 0});
+  other.connectionPoints[0].type = "tagB";  // incompatible
+  catalog.add(other);
+  Station station;
+  PlacedModule ph;
+  ph.defId = "H";
+  const InstanceId idH = station.add(ph);
+  CHECK_FALSE(chooseMate(station, catalog, idH, "h1", other, Quat{}).has_value());
+}
+
 TEST_CASE("collidesWithStation two-id overload skips both instances") {
   ModuleCatalog catalog;
   ModuleDef box;
@@ -561,4 +787,28 @@ TEST_CASE("collidesWithStation two-id overload skips both instances") {
   CHECK(collidesWithStation(box, at0, 0, 0, station, catalog));            // nothing ignored
   CHECK(collidesWithStation(box, at0, id0, 0, station, catalog));          // still hits id1 (touch)
   CHECK_FALSE(collidesWithStation(box, at0, id0, id1, station, catalog));  // both ignored
+}
+
+TEST_CASE("rollAboutConnector: a single-joint module pivots about the connector for ANY axis") {
+  Transform start;  // identity at origin; its connector local {1,0,0} sits at the joint
+  start.position = {0, 0, 0};
+  const Vec3 cpPos{1, 0, 0};  // connector world position (the joint)
+  // An OFF-axis rotation (about Y, not the connector axis) still pivots about the joint and
+  // keeps the module mated — the connector point does not move; the body hinges around it.
+  const RollResult r = rollAboutConnector(start, Vec3{0, 1, 0}, 1.5707963267948966, cpPos, true);
+  CHECK(r.mated);
+  const Vec3 jointAfter = r.preview.position + rotate(r.preview.rotation, Vec3{1, 0, 0});
+  CHECK(jointAfter.x == doctest::Approx(1));
+  CHECK(jointAfter.y == doctest::Approx(0));
+  CHECK(jointAfter.z == doctest::Approx(0));
+}
+
+TEST_CASE("rollAboutConnector: 0 or 2+ joints free-rotate in place, mated=false") {
+  Transform start;
+  start.position = {5, 0, 0};
+  const RollResult none = rollAboutConnector(start, Vec3{0, 0, 1}, 1.0, Vec3{6, 0, 0}, false);
+  CHECK_FALSE(none.mated);
+  CHECK(none.preview.position.x == doctest::Approx(5));  // position unchanged (in place)
+  CHECK(none.preview.position.y == doctest::Approx(0));
+  CHECK(none.preview.position.z == doctest::Approx(0));
 }

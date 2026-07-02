@@ -1,7 +1,10 @@
 #include "x4sb/data/catalog.hpp"
 #include "x4sb/editorcore/editor_state.hpp"
+#include "x4sb/snap/snap.hpp"
 
 #include <doctest/doctest.h>
+
+#include <cmath>
 
 using namespace x4sb;
 
@@ -358,6 +361,58 @@ TEST_CASE("rotateSelected re-orients a placed module via an undoable command") {
   s.undo();
   const Vec3 r0 = rotate(s.station().find(id)->worldTransform.rotation, Vec3{1, 0, 0});
   CHECK(r0.x == doctest::Approx(1).epsilon(1e-9));  // back to identity
+}
+
+TEST_CASE("rotateSelected pivots a connected module about its socket and keeps the link") {
+  // Two unit boxes that snap ADJACENT (connectors on opposing faces, normals +X / -X), so a
+  // ray can pick the second module alone.
+  ModuleCatalog c;
+  ModuleDef a;
+  a.id = "a";
+  a.category = Category::Production;
+  a.aabb = AABB{{-0.5, -0.5, -0.5}, {0.5, 0.5, 0.5}};
+  ConnectionPoint a1;
+  a1.id = "a1";
+  a1.localPosition = {0.5, 0, 0};
+  a1.localRotation = axisAngle(Vec3{0, 1, 0}, 1.5707963267948966);  // normal +X
+  a.connectionPoints = {a1};
+  ModuleDef b;
+  b.id = "b";
+  b.category = Category::Production;
+  b.aabb = AABB{{-0.5, -0.5, -0.5}, {0.5, 0.5, 0.5}};
+  ConnectionPoint b1;
+  b1.id = "b1";
+  b1.localPosition = {-0.5, 0, 0};
+  b1.localRotation = axisAngle(Vec3{0, 1, 0}, -1.5707963267948966);  // normal -X
+  b.connectionPoints = {b1};
+  c.add(a);
+  c.add(b);
+
+  EditorState s(c);                               // active = "a" (sorted first)
+  s.updateGhost(Vec3{0, 10, 0}, Vec3{0, -1, 0});  // root "a" at origin
+  const InstanceId idA = s.commitGhost().value();
+  s.cycleActive(1);
+  REQUIRE(s.activeDef()->id == "b");
+  s.updateGhost(Vec3{0, 0, -10}, Vec3{0, 0, 1});  // aim at "a", snap "b" adjacent at +X
+  REQUIRE(s.ghost().has_value());
+  REQUIRE(s.ghost()->candidate.has_value());
+  const InstanceId idB = s.commitGhost().value();
+  REQUIRE(s.station().find(idB)->links.size() == 1);
+  (void)idA;
+
+  const Vec3 jointBefore = apply(s.station().find(idB)->worldTransform, Vec3{-0.5, 0, 0});
+  s.selectByRay(Vec3{1, 0, -10}, Vec3{0, 0, 1});  // hits "b" (center ~ (1,0,0)) only
+  REQUIRE(s.selected().has_value());
+  REQUIRE(s.selected().value() == idB);
+
+  REQUIRE(s.rotateSelected(Vec3{0, 1, 0}));  // +90 about Y, pivoting at the socket
+  const PlacedModule* bb = s.station().find(idB);
+  REQUIRE(bb != nullptr);
+  const Vec3 jointAfter = apply(bb->worldTransform, Vec3{-0.5, 0, 0});
+  CHECK(jointAfter.x == doctest::Approx(jointBefore.x));  // joint point unmoved (socket pivot)
+  CHECK(jointAfter.y == doctest::Approx(jointBefore.y));
+  CHECK(jointAfter.z == doctest::Approx(jointBefore.z));
+  CHECK(bb->links.size() == 1);  // stays connected
 }
 
 TEST_CASE("gizmo hover: highlightHandle tracks the handle under the cursor") {
@@ -731,4 +786,112 @@ TEST_CASE("setActiveIndex selects by absolute position and ignores out-of-range"
 
   s.setActiveIndex(0);
   CHECK(s.activeDef()->id == "a_mod");
+}
+
+TEST_CASE("runAutoLayout builds the cart into one connected, legal layout") {
+  const ModuleCatalog c = twoModuleCatalog();
+  EditorState s(c);
+  s.cartAdjust("a_mod", 2);
+  const AutoLayoutReport rep = s.runAutoLayout();
+  CHECK(rep.requested == 2);
+  CHECK(rep.snapped + rep.floating >= 2);  // both modules placed (snapped or floating)
+}
+
+TEST_CASE("EditorState layout mode defaults to Organic and cycles") {
+  const ModuleCatalog c = twoModuleCatalog();
+  EditorState s(c);
+  CHECK(s.layoutMode() == LayoutMode::Organic);  // the standard mode (known-issues 4.3 closed)
+  s.cycleLayoutMode();
+  CHECK(s.layoutMode() == LayoutMode::Fishbone);
+  s.cycleLayoutMode();
+  CHECK(s.layoutMode() == LayoutMode::Organic);
+  s.setLayoutMode(LayoutMode::Fishbone);
+  CHECK(s.layoutMode() == LayoutMode::Fishbone);
+}
+
+TEST_CASE("snap ghost honors the user's rotation (chooseMate), identity = baseline") {
+  ModuleCatalog c;
+  c.add(makeModule("host", Category::Production, "h1", {0.5, 0, 0}));
+  // Placeable module with two connectors 90 deg apart.
+  ModuleDef p;
+  p.id = "p";
+  p.category = Category::Production;
+  p.aabb = AABB{{-0.5, -0.5, -0.5}, {0.5, 0.5, 0.5}};
+  ConnectionPoint pa;
+  pa.id = "pa";
+  pa.localPosition = {-0.5, 0, 0};
+  ConnectionPoint pb;
+  pb.id = "pb";
+  pb.localPosition = {0, -0.5, 0};
+  p.connectionPoints = {pa, pb};
+  c.add(p);
+
+  EditorState s(c);                               // active = "host" (sorted first)
+  s.updateGhost(Vec3{0, 10, 0}, Vec3{0, -1, 0});  // free-place host at origin
+  REQUIRE(s.commitGhost().has_value());
+  const InstanceId hostId = s.station().modules().front().instanceId;
+
+  s.cycleActive(1);  // active = "p"
+  REQUIRE(s.activeDef()->id == "p");
+
+  // Identity rotation -> baseline computeSnapTransform.
+  s.updateGhost(Vec3{0, 0, -10}, Vec3{0, 0, 1});  // aim at host
+  REQUIRE(s.ghost().has_value());
+  REQUIRE(s.ghost()->candidate.has_value());
+  const Transform baseline =
+      computeSnapTransform(s.station(), c, hostId, "h1", p, s.ghost()->candidate->newPointId);
+  const Quat gb = s.ghost()->worldTransform.rotation;
+  CHECK(std::abs(gb.w * baseline.rotation.w + gb.x * baseline.rotation.x +
+                 gb.y * baseline.rotation.y + gb.z * baseline.rotation.z) == doctest::Approx(1.0));
+
+  // After a 90 deg rotation, the ghost matches chooseMate at that rotation and differs
+  // from the baseline orientation. Axis {1,0,0} produces a non-zero twist about the
+  // connector normal ({0,0,1}), which is required for the clocking to change.
+  s.rotateGhost(Vec3{1, 0, 0});  // pendingRotation_ = axisAngle({1,0,0}, pi/2)
+  const Quat pend = axisAngle(Vec3{1, 0, 0}, 1.5707963267948966);
+  s.updateGhost(Vec3{0, 0, -10}, Vec3{0, 0, 1});
+  REQUIRE(s.ghost().has_value());
+  REQUIRE(s.ghost()->candidate.has_value());
+  const auto choice = chooseMate(s.station(), c, hostId, "h1", p, pend);
+  REQUIRE(choice.has_value());
+  const Quat gr = s.ghost()->worldTransform.rotation;
+  CHECK(std::abs(gr.w * choice->xf.rotation.w + gr.x * choice->xf.rotation.x +
+                 gr.y * choice->xf.rotation.y + gr.z * choice->xf.rotation.z) ==
+        doctest::Approx(1.0));
+  CHECK(std::abs(gr.w * gb.w + gr.x * gb.x + gr.y * gb.y + gr.z * gb.z) < 0.999);  // differs
+}
+
+TEST_CASE("move-drag snap uses chooseMate for a rotated pose") {
+  ModuleCatalog c;
+  c.add(makeModule("host", Category::Production, "h1", {0.5, 0, 0}));
+  ModuleDef p;
+  p.id = "p";
+  p.category = Category::Production;
+  p.aabb = AABB{{-0.5, -0.5, -0.5}, {0.5, 0.5, 0.5}};
+  ConnectionPoint pa;
+  pa.id = "pa";
+  pa.localPosition = {-0.5, 0, 0};
+  ConnectionPoint pb;
+  pb.id = "pb";
+  pb.localPosition = {0, -0.5, 0};
+  p.connectionPoints = {pa, pb};
+  c.add(p);
+  Station st;
+  PlacedModule ph;
+  ph.defId = "host";
+  const InstanceId hostId = st.add(ph);
+
+  // Axis {1,0,0} produces a non-zero twist about the connector normal ({0,0,1}),
+  // so chooseMate must select a non-zero clocking — a rotation about Z of the
+  // connector normal does not project onto the connector axis after the kMate
+  // 180° Y-rotation, yielding twist=0.
+  const Quat rotated = axisAngle(Vec3{1, 0, 0}, 1.5707963267948966);
+  const auto choice = chooseMate(st, c, hostId, "h1", p, rotated);
+  REQUIRE(choice.has_value());
+  const Transform fixed = computeSnapTransform(st, c, hostId, "h1", p, choice->newPointId);
+  // A rotated drag should not collapse to the single fixed mate.
+  CHECK(std::abs(choice->xf.rotation.w * fixed.rotation.w +
+                 choice->xf.rotation.x * fixed.rotation.x +
+                 choice->xf.rotation.y * fixed.rotation.y +
+                 choice->xf.rotation.z * fixed.rotation.z) < 0.999);
 }

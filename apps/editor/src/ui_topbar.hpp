@@ -6,7 +6,7 @@
 
 namespace x4sb::editor {
 
-enum class TopBarAction { None, Open, Save, Undo, Redo };
+enum class TopBarAction { None, Open, Save, Undo, Redo, Shuffle };
 
 [[nodiscard]] float topBarHeight();
 
