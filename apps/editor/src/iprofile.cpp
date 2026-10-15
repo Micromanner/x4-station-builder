@@ -1,8 +1,9 @@
 #include "iprofile.hpp"
 
-#include "app_paths.hpp"
+#include "bloom.hpp"
 #include "mesh_cache.hpp"
 #include "mesh_load.hpp"
+#include "native_assets.hpp"
 #include "profiling.hpp"
 #include "raylib.h"
 #include "render.hpp"
@@ -38,17 +39,8 @@ constexpr int kWarmup = 5;
 
 }  // namespace
 
-int runInteractiveProfile(const std::string& planPath, int frames) {
-  const std::optional<std::string> catalogPath = findCatalogJson();
-  if (!catalogPath) {
-    std::fprintf(stderr, "iprofile: could not find asset-cache/catalog.json\n");
-    return 1;
-  }
-  std::optional<ModuleCatalog> catalog = ModuleCatalog::loadFromFile(*catalogPath);
-  if (!catalog) {
-    std::fprintf(stderr, "iprofile: failed to load catalog\n");
-    return 1;
-  }
+int runInteractiveProfile(const NativeAssets& native, const std::string& planPath, int frames) {
+  const ModuleCatalog* catalog = &native.catalog;
   std::ifstream in(planPath, std::ios::binary);
   if (!in) {
     std::fprintf(stderr, "iprofile: cannot open plan %s\n", planPath.c_str());
@@ -71,18 +63,20 @@ int runInteractiveProfile(const std::string& planPath, int frames) {
 
   InitWindow(kScreenW, kScreenH, "X4 Station Builder - iprofile");
   {
-    MeshCache meshes{std::filesystem::path(*catalogPath).parent_path()};
+    MeshCache meshes{native};
+    FramePipeline pipeline;
     loadStationMeshes(state.station(), *catalog, meshes);  // warm, like the live editor
 
     const Vec3 dt = flipZ(bounds.center);  // display-space camera target (scene flips Z)
     const ::Vector3 target{static_cast<float>(dt.x), static_cast<float>(dt.y),
                            static_cast<float>(dt.z)};
     const double radius = std::max(bounds.radius, 1.0);
-    const double dist = radius * 1.6;
     constexpr double kPitch = 0.45;
+    // Orbit + dolly (0.4R..3R), like --profile: the depth sweep drives mass LOD switches.
     const auto cameraAt = [&](int i) {
-      const double yaw =
-          (static_cast<double>(i) / static_cast<double>(total)) * 4.0 * static_cast<double>(PI);
+      const double t = static_cast<double>(i) / static_cast<double>(total);
+      const double yaw = t * 4.0 * static_cast<double>(PI);
+      const double dist = radius * (1.7 + 1.3 * std::cos(t * 2.0 * static_cast<double>(PI)));
       const Vec3 dir{std::cos(kPitch) * std::sin(yaw), std::sin(kPitch),
                      std::cos(kPitch) * std::cos(yaw)};
       return ::Camera3D{::Vector3{target.x + static_cast<float>(dir.x * dist),
@@ -101,9 +95,11 @@ int runInteractiveProfile(const std::string& planPath, int frames) {
     for (int i = 0; i < kWarmup && !WindowShouldClose(); ++i) {
       driveGhost();
       BeginDrawing();
+      pipeline.begin();
       ClearBackground(::Color{30, 30, 38, 255});
       drawScene(state, cameraAt(0), meshes, /*showGizmos=*/true, /*showMeshes=*/true,
-                /*lodEnabled=*/true);
+                /*lodEnabled=*/false);
+      pipeline.end();
       EndDrawing();
     }
 
@@ -116,9 +112,11 @@ int runInteractiveProfile(const std::string& planPath, int frames) {
       {
         ZoneScopedN("frame");
         BeginDrawing();
+        pipeline.begin();
         ClearBackground(::Color{30, 30, 38, 255});
         drawScene(state, camera, meshes, /*showGizmos=*/true, /*showMeshes=*/true,
-                  /*lodEnabled=*/true);
+                  /*lodEnabled=*/false);
+        pipeline.end();
         EndDrawing();
       }
       frameMs.push_back((GetTime() - t0) * 1000.0);

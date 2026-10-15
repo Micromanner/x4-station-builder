@@ -1,23 +1,30 @@
 #include "mesh_load.hpp"
 
 #include "raylib.h"
+#include "x4sb/data/catalog.hpp"
 #include "x4sb/editorcore/mesh_paths.hpp"
 
+#include <algorithm>
+#include <chrono>
 #include <string>
 #include <vector>
 
 namespace x4sb::editor {
 
 void loadStationMeshes(const Station& station, const ModuleCatalog& catalog, MeshCache& meshes) {
-  const std::vector<std::string> paths = meshPathsFor(station, catalog);
+  // Every part's coarser LOD siblings too: the per-part LOD pick swaps files as the
+  // camera moves, and a first-use upload mid-frame is a visible hitch.
+  std::vector<std::string> paths;
+  for (const std::string& base : meshPathsFor(station, catalog)) {
+    paths.push_back(base);
+    for (int lod = 1; lod < 4; ++lod) paths.push_back(meshKeyLod(base, lod));
+  }
   const int total = static_cast<int>(paths.size());
   if (total == 0) return;
 
-  // Upload as fast as the GPU allows; redraw the progress bar on a time interval
-  // (not per mesh) so the bar's refresh rate is decoupled from mesh count and from
-  // any v-sync wait in EndDrawing — the uploads themselves are the wait being shown.
-  constexpr double kRedrawInterval = 0.05;  // ~20 progress updates/sec
-  double lastDraw = -1.0;
+  // Workers decode in parallel; this thread uploads for up to one redraw interval
+  // at a time, so the bar refreshes ~20/s regardless of mesh count.
+  constexpr double kRedrawInterval = 0.05;
 
   const auto drawProgress = [&](int done) {
     BeginDrawing();
@@ -38,14 +45,14 @@ void loadStationMeshes(const Station& station, const ModuleCatalog& catalog, Mes
     EndDrawing();
   };
 
-  for (int i = 0; i < total; ++i) {
-    meshes.warm(paths[static_cast<std::size_t>(i)]);
-    const double now = GetTime();
-    if (lastDraw < 0.0 || now - lastDraw >= kRedrawInterval || i + 1 == total) {
-      drawProgress(i + 1);
-      lastDraw = GetTime();
-      if (WindowShouldClose()) break;
-    }
+  for (int i = 0; i < total; ++i)
+    meshes.request(paths[static_cast<std::size_t>(i)], /*optional=*/i % 4 != 0);
+  for (;;) {
+    meshes.pumpStreaming(kRedrawInterval, std::chrono::milliseconds{5});
+    const auto done = static_cast<int>(std::count_if(
+        paths.begin(), paths.end(), [&](const auto& path) { return meshes.isResolved(path); }));
+    drawProgress(done);
+    if (done == total || WindowShouldClose()) return;
   }
 }
 

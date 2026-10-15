@@ -37,6 +37,11 @@ class Station {
   [[nodiscard]] const std::vector<PlacedModule>& modules() const { return placed_; }
   [[nodiscard]] std::size_t size() const { return placed_.size(); }
   [[nodiscard]] bool empty() const { return placed_.empty(); }
+  // Changes on every mutation and is drawn from one process-wide counter, so two
+  // stations (or two states of one) never share a value unless their content is
+  // equal (a copy keeps its source's value until either side mutates). Render
+  // caches key on it instead of hashing every module per frame.
+  [[nodiscard]] std::uint64_t revision() const { return revision_; }
 
  private:
   // id -> position in placed_, so find() is O(1) instead of a linear scan. The
@@ -46,9 +51,12 @@ class Station {
   // follow-up). Maintained only by add()/remove(); find() returns a mutable element
   // for in-place edits, which never change ids, so the map stays valid.
   void reindex();
+  void touch();
   std::vector<PlacedModule> placed_;
   std::unordered_map<InstanceId, std::size_t> index_;
   InstanceId nextId_{1};
+  std::uint64_t revision_{nextRevision()};
+  [[nodiscard]] static std::uint64_t nextRevision();
 };
 
 // One reversible edit. Concrete commands (place/move/delete/link) implement this.

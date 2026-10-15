@@ -2,13 +2,125 @@
 
 #include <algorithm>
 #include <cctype>
+#include <charconv>
 #include <filesystem>
 #include <fstream>
+#include <limits>
 #include <sstream>
 #include <utility>
 
+#ifdef _WIN32
+#ifndef NOMINMAX
+#define NOMINMAX
+#endif
+#ifndef WIN32_LEAN_AND_MEAN
+#define WIN32_LEAN_AND_MEAN
+#endif
+#include <windows.h>
+#else
+#include <fcntl.h>
+#include <sys/stat.h>
+#include <unistd.h>
+
+#include <cerrno>
+#endif
+
 namespace x4sb {
 namespace fs = std::filesystem;
+
+// One immutable handle per .dat, shared by its entries and Archive copies.
+// All reads supply their own offset; no shared seek cursor or archive-wide lock.
+class Archive::File {
+ public:
+  explicit File(const std::string& path) {
+#ifdef _WIN32
+    handle_ = CreateFileW(fs::path(path).c_str(), GENERIC_READ,
+                          FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE, nullptr,
+                          OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL | FILE_FLAG_OVERLAPPED, nullptr);
+#else
+    handle_ = open(path.c_str(), O_RDONLY | O_CLOEXEC);
+#endif
+  }
+  ~File() {
+#ifdef _WIN32
+    if (handle_ != INVALID_HANDLE_VALUE) CloseHandle(handle_);
+#else
+    if (handle_ >= 0) close(handle_);
+#endif
+  }
+  File(const File&) = delete;
+  File& operator=(const File&) = delete;
+  File(File&&) = delete;
+  File& operator=(File&&) = delete;
+
+  [[nodiscard]] std::optional<std::string> read(std::uint64_t offset, std::uint64_t size) const {
+    std::uint64_t fileSize = 0;
+#ifdef _WIN32
+    LARGE_INTEGER length{};
+    if (handle_ == INVALID_HANDLE_VALUE || !GetFileSizeEx(handle_, &length) || length.QuadPart < 0)
+      return std::nullopt;
+    fileSize = static_cast<std::uint64_t>(length.QuadPart);
+#else
+    struct stat info{};
+    if (handle_ < 0 || fstat(handle_, &info) != 0 || info.st_size < 0) return std::nullopt;
+    fileSize = static_cast<std::uint64_t>(info.st_size);
+#endif
+    if (offset > fileSize || size > fileSize - offset || size > std::string{}.max_size())
+      return std::nullopt;
+    std::string bytes(static_cast<std::size_t>(size), '\0');
+    std::size_t done = 0;
+#ifdef _WIN32
+    struct Event {
+      HANDLE handle = CreateEventW(nullptr, TRUE, FALSE, nullptr);
+      ~Event() {
+        if (handle != nullptr) CloseHandle(handle);
+      }
+      Event() = default;
+      Event(const Event&) = delete;
+      Event& operator=(const Event&) = delete;
+      Event(Event&&) = delete;
+      Event& operator=(Event&&) = delete;
+    };
+    const Event event;
+    if (event.handle == nullptr) return std::nullopt;
+#endif
+    while (done < bytes.size()) {
+      const auto chunk = std::min(bytes.size() - done, std::size_t{1} << 30);
+#ifdef _WIN32
+      OVERLAPPED request{};
+      const auto position = offset + done;
+      // OVERLAPPED exposes its documented file offset through a Windows union.
+      // NOLINTNEXTLINE(cppcoreguidelines-pro-type-union-access)
+      request.Offset = static_cast<DWORD>(position & 0xFFFFFFFFU);
+      // NOLINTNEXTLINE(cppcoreguidelines-pro-type-union-access)
+      request.OffsetHigh = static_cast<DWORD>(position >> 32);
+      request.hEvent = event.handle;
+      DWORD received = 0;
+      if (!ReadFile(handle_, bytes.data() + done, static_cast<DWORD>(chunk), &received, &request)) {
+        if (GetLastError() != ERROR_IO_PENDING ||
+            !GetOverlappedResult(handle_, &request, &received, TRUE))
+          return std::nullopt;
+      }
+      if (received == 0) return std::nullopt;
+      done += received;
+#else
+      const auto received =
+          pread(handle_, bytes.data() + done, chunk, static_cast<off_t>(offset + done));
+      if (received < 0 && errno == EINTR) continue;
+      if (received <= 0) return std::nullopt;
+      done += static_cast<std::size_t>(received);
+#endif
+    }
+    return bytes;
+  }
+
+ private:
+#ifdef _WIN32
+  HANDLE handle_ = INVALID_HANDLE_VALUE;
+#else
+  int handle_ = -1;
+#endif
+};
 
 namespace {
 
@@ -16,18 +128,15 @@ namespace {
 // peel the three trailing fields (size, mtime, md5) off the right.
 bool parseLine(const std::string& line, std::string& path, std::uint64_t& size) {
   const auto md5 = line.find_last_of(' ');
-  if (md5 == std::string::npos) return false;
+  if (md5 == std::string::npos || md5 == 0) return false;
   const auto mtime = line.find_last_of(' ', md5 - 1);
-  if (mtime == std::string::npos) return false;
+  if (mtime == std::string::npos || mtime == 0) return false;
   const auto sz = line.find_last_of(' ', mtime - 1);
   if (sz == std::string::npos) return false;
 
   const std::string sizeStr = line.substr(sz + 1, mtime - sz - 1);
-  try {
-    size = std::stoull(sizeStr);
-  } catch (const std::exception&) {
-    return false;
-  }
+  const auto parsed = std::from_chars(sizeStr.data(), sizeStr.data() + sizeStr.size(), size);
+  if (parsed.ec != std::errc{} || parsed.ptr != sizeStr.data() + sizeStr.size()) return false;
   path = line.substr(0, sz);
   return !path.empty();
 }
@@ -52,16 +161,6 @@ std::string toLowerAscii(std::string s) {
   return s;
 }
 
-std::string readSlice(const std::string& datPath, std::uint64_t offset, std::uint64_t size) {
-  std::ifstream in(datPath, std::ios::binary);
-  if (!in) return {};
-  in.seekg(static_cast<std::streamoff>(offset));
-  std::string buf(size, '\0');
-  in.read(buf.data(), static_cast<std::streamsize>(size));
-  if (static_cast<std::uint64_t>(in.gcount()) != size) return {};
-  return buf;
-}
-
 }  // namespace
 
 CatIndex CatIndex::parse(const std::string& catText) {
@@ -79,6 +178,7 @@ CatIndex CatIndex::parse(const std::string& catText) {
     std::string path;
     std::uint64_t size = 0;
     if (!parseLine(line, path, size)) continue;
+    if (size > std::numeric_limits<std::uint64_t>::max() - offset) return {};
     idx.entries_.push_back({path, size, offset});
     offset += size;
   }
@@ -105,10 +205,12 @@ bool Archive::addCatalog(const std::string& catPath, const std::string& logicalP
   const std::string text = contents.str();
 
   const std::string datPath = swapExtension(catPath, ".dat");
+  const auto file = std::make_shared<File>(datPath);
   const CatIndex idx = CatIndex::parse(text);
+  catalogPaths_.push_back(fs::absolute(catPath).lexically_normal().string());
   for (const auto& e : idx.entries())
     // Lower-cased key so extract()'s case-insensitive lookup matches (later cats overwrite).
-    index_[toLowerAscii(logicalPrefix + e.path)] = Source{datPath, e.offset, e.size};
+    index_[toLowerAscii(logicalPrefix + e.path)] = Source{file, e.offset, e.size};
 
   // Record this prefix once (dedup: linear scan; there are only a handful).
   if (std::find(sources_.begin(), sources_.end(), logicalPrefix) == sources_.end())
@@ -160,9 +262,7 @@ int Archive::addInstall(const std::string& x4Dir) {
 std::optional<std::string> Archive::extract(const std::string& path) const {
   const auto it = index_.find(toLowerAscii(path));
   if (it == index_.end()) return std::nullopt;
-  std::string bytes = readSlice(it->second.datPath, it->second.offset, it->second.size);
-  if (bytes.size() != it->second.size) return std::nullopt;
-  return bytes;
+  return it->second.file->read(it->second.offset, it->second.size);
 }
 
 bool Archive::contains(const std::string& path) const {

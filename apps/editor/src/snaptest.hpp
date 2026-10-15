@@ -8,9 +8,11 @@
 
 namespace x4sb::editor {
 
+struct NativeAssets;
+
 // Run the harness and return a process exit code (0 ok, 1 on error). Owns its own
 // InitWindow/MeshCache/CloseWindow; do NOT call after the interactive path has
 // created a window. Writes "<outPrefix>_mesh.png" and "<outPrefix>_box.png".
-[[nodiscard]] int runSnapTest(const std::string& outPrefix);
+[[nodiscard]] int runSnapTest(const NativeAssets& native, const std::string& outPrefix);
 
 }  // namespace x4sb::editor

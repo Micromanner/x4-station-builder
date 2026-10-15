@@ -1,7 +1,8 @@
 #include "connbench.hpp"
 
-#include "app_paths.hpp"
+#include "bloom.hpp"
 #include "mesh_cache.hpp"
+#include "native_assets.hpp"
 #include "raylib.h"
 #include "render.hpp"
 #include "x4sb/data/catalog.hpp"
@@ -72,11 +73,13 @@ struct Result {
 };
 
 template <typename DrawFn>
-Result timed(int frames, const DrawFn& draw) {
+Result timed(FramePipeline& pipeline, int frames, const DrawFn& draw) {
   for (int i = 0; i < kWarmup && !WindowShouldClose(); ++i) {
     BeginDrawing();
+    pipeline.begin();
     ClearBackground(::Color{30, 30, 38, 255});
     draw();
+    pipeline.end();
     EndDrawing();
   }
   std::vector<double> ms;
@@ -84,8 +87,10 @@ Result timed(int frames, const DrawFn& draw) {
   for (int i = 0; i < frames && !WindowShouldClose(); ++i) {
     const double t0 = GetTime();
     BeginDrawing();
+    pipeline.begin();
     ClearBackground(::Color{30, 30, 38, 255});
     draw();
+    pipeline.end();
     EndDrawing();
     ms.push_back((GetTime() - t0) * 1000.0);
   }
@@ -101,17 +106,8 @@ void report(const char* label, const Result& r) {
 
 }  // namespace
 
-int runConnBench(int modules, int frames, double spacingOverride) {
-  const std::optional<std::string> catalogPath = findCatalogJson();
-  if (!catalogPath) {
-    std::fprintf(stderr, "connbench: could not find asset-cache/catalog.json\n");
-    return 1;
-  }
-  std::optional<ModuleCatalog> catalog = ModuleCatalog::loadFromFile(*catalogPath);
-  if (!catalog) {
-    std::fprintf(stderr, "connbench: failed to load catalog\n");
-    return 1;
-  }
+int runConnBench(const NativeAssets& native, int modules, int frames, double spacingOverride) {
+  const ModuleCatalog* catalog = &native.catalog;
   const ModuleDef* def = pickModule(*catalog);
   if (def == nullptr) {
     std::fprintf(stderr, "connbench: no module with both meshes and connectors\n");
@@ -148,19 +144,21 @@ int runConnBench(int modules, int frames, double spacingOverride) {
 
   InitWindow(kScreenW, kScreenH, "X4 Station Builder - connbench");
   {
-    MeshCache meshes{std::filesystem::path(*catalogPath).parent_path()};
+    MeshCache meshes{native};
+    FramePipeline pipeline;
     const int f = std::max(frames, 1);
 
-    const Result baseline = timed(f, [&] {
+    const Result baseline = timed(pipeline, f, [&] {
       drawScene(station, *catalog, camera, meshes, /*showGizmos=*/false, /*showMeshes=*/true,
                 /*allConnectors=*/false);
     });
-    const Result oldAll = timed(f, [&] {
+    const Result oldAll = timed(pipeline, f, [&] {
       drawScene(station, *catalog, camera, meshes, /*showGizmos=*/false, /*showMeshes=*/true,
                 /*allConnectors=*/true);
     });
-    const Result newGrid = timed(
-        f, [&] { drawScene(state, camera, meshes, /*showGizmos=*/false, /*showMeshes=*/true); });
+    const Result newGrid = timed(pipeline, f, [&] {
+      drawScene(state, camera, meshes, /*showGizmos=*/false, /*showMeshes=*/true);
+    });
 
     report("baseline (no connectors)", baseline);
     report("OLD: all connectors (pre-fix)", oldAll);

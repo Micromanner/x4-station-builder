@@ -1,7 +1,8 @@
 #include "rdc_capture.hpp"
 
-#include "app_paths.hpp"
+#include "bloom.hpp"
 #include "mesh_cache.hpp"
+#include "native_assets.hpp"
 #include "raylib.h"
 #include "rdc_api.hpp"
 #include "render.hpp"
@@ -27,7 +28,7 @@ constexpr int kWarmup = 10;  // upload meshes / compile shaders before the captu
 
 // Draw one representative framed view of the whole station.
 void drawFramed(const Station& station, const ModuleCatalog& catalog, MeshCache& meshes,
-                const Vec3& displayTarget, double radius) {
+                FramePipeline& pipeline, const Vec3& displayTarget, double radius) {
   const ::Vector3 target{static_cast<float>(displayTarget.x), static_cast<float>(displayTarget.y),
                          static_cast<float>(displayTarget.z)};
   const double dist = std::max(radius, 1.0) * 1.8;  // whole station in view
@@ -40,24 +41,17 @@ void drawFramed(const Station& station, const ModuleCatalog& catalog, MeshCache&
                                     target.z + static_cast<float>(dir.z * dist)},
                           target, ::Vector3{0.0f, 1.0f, 0.0f}, 45.0f, CAMERA_PERSPECTIVE};
   BeginDrawing();
+  pipeline.begin();
   ClearBackground(::Color{30, 30, 38, 255});
   drawScene(station, catalog, camera, meshes, /*showGizmos=*/true, /*showMeshes=*/true);
+  pipeline.end();
   EndDrawing();
 }
 
 }  // namespace
 
-int runRdcCapture(const std::string& planPath) {
-  const std::optional<std::string> catalogPath = findCatalogJson();
-  if (!catalogPath) {
-    std::fprintf(stderr, "rdc: could not find asset-cache/catalog.json\n");
-    return 1;
-  }
-  std::optional<ModuleCatalog> catalog = ModuleCatalog::loadFromFile(*catalogPath);
-  if (!catalog) {
-    std::fprintf(stderr, "rdc: failed to load catalog %s\n", catalogPath->c_str());
-    return 1;
-  }
+int runRdcCapture(const NativeAssets& native, const std::string& planPath) {
+  const ModuleCatalog* catalog = &native.catalog;
   std::ifstream in(planPath, std::ios::binary);
   if (!in) {
     std::fprintf(stderr, "rdc: cannot open plan %s\n", planPath.c_str());
@@ -81,15 +75,16 @@ int runRdcCapture(const std::string& planPath) {
 
   InitWindow(kScreenW, kScreenH, "X4 Station Builder - rdc");
   {
-    MeshCache meshes{std::filesystem::path(*catalogPath).parent_path()};
+    MeshCache meshes{native};
+    FramePipeline pipeline;
     const Vec3 displayTarget = flipZ(bounds.center);  // scene flips Z
 
     for (int i = 0; i < kWarmup && !WindowShouldClose(); ++i)
-      drawFramed(*station, *catalog, meshes, displayTarget, bounds.radius);
+      drawFramed(*station, *catalog, meshes, pipeline, displayTarget, bounds.radius);
 
     // Bracket exactly one frame: RenderDoc records every GL call between these.
     rdc::startFrameCapture();
-    drawFramed(*station, *catalog, meshes, displayTarget, bounds.radius);
+    drawFramed(*station, *catalog, meshes, pipeline, displayTarget, bounds.radius);
     rdc::endFrameCapture();
   }
   CloseWindow();

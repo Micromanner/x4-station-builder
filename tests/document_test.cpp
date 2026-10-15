@@ -4,6 +4,7 @@
 #include <doctest/doctest.h>
 
 #include <cmath>
+#include <cstdint>
 #include <memory>
 
 using namespace x4sb;
@@ -28,6 +29,44 @@ TEST_CASE("Station assigns instance ids and finds modules") {
   CHECK(s.size() == 1);
   REQUIRE(s.find(id) != nullptr);
   CHECK(s.find(id)->defId == "prod_module");
+}
+
+TEST_CASE("Station revision changes on every mutation and never on reads") {
+  Station s;
+  const std::uint64_t r0 = s.revision();
+  const InstanceId id = s.add(PlacedModule{});
+  const std::uint64_t r1 = s.revision();
+  CHECK(r1 != r0);
+
+  const Station& cs = s;
+  CHECK(cs.find(id) != nullptr);
+  CHECK(cs.modules().size() == 1);
+  CHECK(s.revision() == r1);
+
+  REQUIRE(s.find(id) != nullptr);  // mutable access may edit in place
+  const std::uint64_t r2 = s.revision();
+  CHECK(r2 != r1);
+
+  CHECK(s.find(id + 1) == nullptr);
+  CHECK_FALSE(s.remove(id + 1));
+  CHECK(s.revision() == r2);
+
+  CHECK(s.remove(id));
+  CHECK(s.revision() != r2);
+}
+
+TEST_CASE("Station revisions are unique across stations") {
+  const Station a;
+  const Station b;
+  CHECK(a.revision() != b.revision());
+
+  Station c = a;
+  CHECK(c.revision() == a.revision());  // equal content may share a key
+  c.add(PlacedModule{});
+  Station d = a;
+  d.add(PlacedModule{});
+  CHECK(c.revision() != a.revision());
+  CHECK(c.revision() != d.revision());  // same edit on two copies still differs
 }
 
 TEST_CASE("undo and redo of an add command") {

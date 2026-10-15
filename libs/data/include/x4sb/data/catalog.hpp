@@ -2,7 +2,6 @@
 // In-memory module catalog, loaded from the generated catalog.json (spec §4B.1).
 #include "x4sb/data/types.hpp"
 
-#include <optional>
 #include <string>
 #include <unordered_map>
 #include <vector>
@@ -11,8 +10,6 @@ namespace x4sb {
 
 class ModuleCatalog {
  public:
-  // Parse a generated catalog.json. Returns nullopt on IO/parse error.
-  static std::optional<ModuleCatalog> loadFromFile(const std::string& path);
   // Parse catalog JSON text directly (throws nlohmann::json::exception on bad input).
   static ModuleCatalog loadFromJson(const std::string& jsonText);
 
@@ -29,10 +26,11 @@ class ModuleCatalog {
   std::unordered_map<std::string, ModuleDef> modules_;
 };
 
-// Serialize modules to the catalog.json schema ModuleCatalog::loadFromJson accepts.
+// Serialize modules to the catalog JSON schema ModuleCatalog::loadFromJson accepts.
 [[nodiscard]] std::string toCatalogJson(const std::vector<ModuleDef>& modules);
 
-// Write catalog.json to `path`. Returns false on IO error.
-[[nodiscard]] bool writeCatalogFile(const std::vector<ModuleDef>& modules, const std::string& path);
+// Key of the coarser LOD `lod` (1..3) of the part `meshKey`: "<meshKey>-lod<N>".
+// lod 0 returns `meshKey` itself.
+[[nodiscard]] std::string meshKeyLod(const std::string& meshKey, int lod);
 
 }  // namespace x4sb

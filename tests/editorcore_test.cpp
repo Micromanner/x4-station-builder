@@ -126,6 +126,20 @@ TEST_CASE("free-place uses a camera standoff, not the ground plane") {
   CHECK(s.ghost()->worldTransform.position.z == doctest::Approx(0));
 }
 
+TEST_CASE("free-place never puts the camera inside a module bigger than the standoff") {
+  ModuleCatalog c;
+  ModuleDef big;
+  big.id = "big";
+  big.category = Category::Production;
+  big.aabb = AABB{{-300, -100, -400}, {300, 100, 400}};  // reach = |(300,100,400)| ~ 509.9
+  c.add(big);
+  EditorState s(c);
+  s.setPlaceDistance(20.0);  // captured while zoomed in
+  s.updateGhost(Vec3{0, 0, 0}, Vec3{0, 0, 1});
+  REQUIRE(s.ghost().has_value());
+  CHECK(s.ghost()->worldTransform.position.z == doctest::Approx(2.5 * std::sqrt(260000.0)));
+}
+
 TEST_CASE("snap ghost: aim at a placed module -> previews onto its free connector") {
   const ModuleCatalog c = twoModuleCatalog();  // a_mod conn a1 at (+0.5,0,0); b_mod conn b1
   EditorState s(c);                            // active = a_mod

@@ -153,8 +153,7 @@ TEST_CASE("autoLayout is additive: existing transforms unchanged; target only ga
   CHECK(r.station.find(hid)->worldTransform.position.x == doctest::Approx(5.0));  // not moved
   CHECK(r.station.size() == 4);
   REQUIRE(r.placements.size() == 3);
-  CHECK(r.report.snapped ==
-        3);  // the spoke snapped onto the sub-spine hub
+  CHECK(r.report.snapped == 3);  // the spoke snapped onto the sub-spine hub
   // The original hub gained exactly one incoming link, to the newly-added rib hub.
   REQUIRE(r.station.find(hid)->links.size() == 1);
   CHECK(r.station.find(hid)->links[0].otherInstanceId == r.placements[0].instanceId);

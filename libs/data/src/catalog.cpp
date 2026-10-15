@@ -2,8 +2,10 @@
 
 #include <nlohmann/json.hpp>
 
-#include <fstream>
-#include <sstream>
+#include <array>
+#include <optional>
+#include <string_view>
+#include <utility>
 
 namespace x4sb {
 
@@ -56,6 +58,25 @@ std::string categoryToString(Category c) {
 json writeVec3(const Vec3& v) { return json::array({v.x, v.y, v.z}); }
 json writeQuat(const Quat& q) { return json::array({q.w, q.x, q.y, q.z}); }
 
+constexpr std::array<std::pair<LightKind, std::string_view>, 4> kLightKinds{{
+    {LightKind::Omni, "omni"},
+    {LightKind::Spot, "spot"},
+    {LightKind::Box, "box"},
+    {LightKind::Area, "area"},
+}};
+
+std::optional<LightKind> parseLightKind(std::string_view s) {
+  for (const auto& [kind, name] : kLightKinds)
+    if (name == s) return kind;
+  return std::nullopt;
+}
+
+std::string lightKindName(LightKind k) {
+  for (const auto& [kind, name] : kLightKinds)
+    if (kind == k) return std::string(name);
+  return "omni";
+}
+
 }  // namespace
 
 // Tolerant parse of the catalog schema. The exact schema is finalized once the
@@ -93,7 +114,15 @@ ModuleCatalog ModuleCatalog::loadFromJson(const std::string& text) {
     if (m.contains("meshRefs")) {
       for (const auto& r : m.at("meshRefs")) {
         MeshRef mr;
-        mr.gltfPath = r.value("gltfPath", std::string{});
+        mr.meshKey = r.value("meshKey", std::string{});
+        mr.radius = r.value("radius", 0.0);
+        mr.xmfPath = r.value("xmfPath", std::string{});
+        mr.materialRef = r.value("materialRef", std::string{});
+        if (r.contains("uvAnimation")) mr.uvAnimation = uvAnimationFromJson(r.at("uvAnimation"));
+        const int detail = r.value("detail", 0);
+        if (detail > 0 && detail <= static_cast<int>(DetailClass::XL))
+          mr.detail = static_cast<DetailClass>(detail);
+        mr.effect = r.value("effect", false);
         if (r.contains("localTransform")) {
           const json& t = r.at("localTransform");
           mr.localTransform.position = readVec3(t.value("position", json::array()));
@@ -112,21 +141,30 @@ ModuleCatalog ModuleCatalog::loadFromJson(const std::string& text) {
         d.clearanceVolumes.push_back(std::move(cv));
       }
     }
+    if (m.contains("lights")) {
+      for (const auto& v : m.at("lights")) {
+        const std::optional<LightKind> kind = parseLightKind(v.value("kind", std::string{}));
+        if (!kind) continue;
+        LocalLight l;
+        l.kind = *kind;
+        l.local.position = readVec3(v.value("position", json::array()));
+        l.local.rotation = readQuat(v.value("rotation", json::array()));
+        l.color = readVec3(v.value("color", json::array()));
+        l.intensity = v.value("intensity", 1.0);
+        l.specularIntensity = v.value("specularIntensity", 1.0);
+        l.range = v.value("range", 0.0);
+        l.spotAngle = v.value("spotAngle", 0.0);
+        l.boxSize = readVec3(v.value("boxSize", json::array()));
+        l.areaX = v.value("areaX", 0.0);
+        l.areaY = v.value("areaY", 0.0);
+        l.areaRadius = v.value("areaRadius", 0.0);
+        l.spotAttenuation = v.value("spotAttenuation", 0.0);
+        d.lights.push_back(l);
+      }
+    }
     if (!d.id.empty()) cat.add(d);
   }
   return cat;
-}
-
-std::optional<ModuleCatalog> ModuleCatalog::loadFromFile(const std::string& path) {
-  const std::ifstream in(path);
-  if (!in) return std::nullopt;
-  std::stringstream ss;
-  ss << in.rdbuf();
-  try {
-    return loadFromJson(ss.str());
-  } catch (const std::exception&) {
-    return std::nullopt;
-  }
 }
 
 const ModuleDef* ModuleCatalog::find(const std::string& macroId) const {
@@ -158,10 +196,17 @@ std::string toCatalogJson(const std::vector<ModuleDef>& modules) {
 
     json refs = json::array();
     for (const MeshRef& r : d.meshRefs) {
-      refs.push_back({{"gltfPath", r.gltfPath},
-                      {"localTransform",
-                       {{"position", writeVec3(r.localTransform.position)},
-                        {"rotation", writeQuat(r.localTransform.rotation)}}}});
+      json ref = {{"meshKey", r.meshKey},
+                  {"xmfPath", r.xmfPath},
+                  {"materialRef", r.materialRef},
+                  {"radius", r.radius},
+                  {"localTransform",
+                   {{"position", writeVec3(r.localTransform.position)},
+                    {"rotation", writeQuat(r.localTransform.rotation)}}}};
+      if (!r.uvAnimation.channels.empty()) ref["uvAnimation"] = uvAnimationToJson(r.uvAnimation);
+      if (r.detail != DetailClass::None) ref["detail"] = static_cast<int>(r.detail);
+      if (r.effect) ref["effect"] = true;
+      refs.push_back(std::move(ref));
     }
     m["meshRefs"] = std::move(refs);
 
@@ -173,17 +218,32 @@ std::string toCatalogJson(const std::vector<ModuleDef>& modules) {
                       {"shipSize", v.shipSize}});
     }
     m["clearanceVolumes"] = std::move(vols);
+
+    json lights = json::array();
+    for (const LocalLight& l : d.lights) {
+      lights.push_back({{"kind", lightKindName(l.kind)},
+                        {"position", writeVec3(l.local.position)},
+                        {"rotation", writeQuat(l.local.rotation)},
+                        {"color", writeVec3(l.color)},
+                        {"intensity", l.intensity},
+                        {"specularIntensity", l.specularIntensity},
+                        {"range", l.range},
+                        {"spotAngle", l.spotAngle},
+                        {"boxSize", writeVec3(l.boxSize)},
+                        {"areaX", l.areaX},
+                        {"areaY", l.areaY},
+                        {"areaRadius", l.areaRadius},
+                        {"spotAttenuation", l.spotAttenuation}});
+    }
+    m["lights"] = std::move(lights);
     mods.push_back(std::move(m));
   }
   return json{{"modules", std::move(mods)}}.dump(2);
 }
 
-bool writeCatalogFile(const std::vector<ModuleDef>& modules, const std::string& path) {
-  std::ofstream out(path);
-  if (!out) return false;
-  out << toCatalogJson(modules);
-  out.flush();
-  return out.good();
+std::string meshKeyLod(const std::string& meshKey, int lod) {
+  if (lod <= 0) return meshKey;
+  return meshKey + "-lod" + std::to_string(lod);
 }
 
 }  // namespace x4sb

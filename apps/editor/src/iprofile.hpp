@@ -7,5 +7,7 @@
 #include <string>
 
 namespace x4sb::editor {
-int runInteractiveProfile(const std::string& planPath, int frames);
+
+struct NativeAssets;
+int runInteractiveProfile(const NativeAssets& native, const std::string& planPath, int frames);
 }  // namespace x4sb::editor

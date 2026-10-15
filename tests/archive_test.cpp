@@ -4,8 +4,55 @@
 
 #include <filesystem>
 #include <fstream>
+#include <future>
 
 using namespace x4sb;
+
+TEST_CASE("Archive positional reads remain independent across threads and copies") {
+  namespace fs = std::filesystem;
+  const auto dir = fs::temp_directory_path() / "x4sb_archive_parallel_test";
+  fs::create_directories(dir);
+  const std::string first(65539, 'a');
+  const std::string second(8197, 'b');
+  std::ofstream(dir / "01.cat", std::ios::binary)
+      << "a " << first.size() << " 1 aa\nb " << second.size() << " 1 bb\n";
+  std::ofstream(dir / "01.dat", std::ios::binary) << first << second;
+  Archive archive;
+  REQUIRE(archive.addCatalog((dir / "01.cat").string()));
+  const Archive copy = archive;
+  std::vector<std::future<bool>> workers;
+  for (int worker = 0; worker < 8; ++worker) {
+    workers.push_back(std::async(std::launch::async, [&, worker] {
+      const auto& reader = worker % 2 == 0 ? archive : copy;
+      for (int i = 0; i < 64; ++i) {
+        const auto a = reader.extract("A");
+        const auto b = reader.extract("b");
+        if (!a || !b || *a != first || *b != second) return false;
+      }
+      return true;
+    }));
+  }
+  for (auto& worker : workers) CHECK(worker.get());
+  fs::remove(dir / "01.cat");
+  fs::remove(dir / "01.dat");
+  fs::remove(dir);
+}
+
+TEST_CASE("Archive validates oversized and truncated slices before allocating") {
+  namespace fs = std::filesystem;
+  const auto dir = fs::temp_directory_path() / "x4sb_archive_bounds_test";
+  fs::create_directories(dir);
+  std::ofstream(dir / "01.cat", std::ios::binary) << "huge 9223372036854775807 1 aa\n";
+  std::ofstream(dir / "01.dat", std::ios::binary) << "tiny";
+  Archive archive;
+  REQUIRE(archive.addCatalog((dir / "01.cat").string()));
+  CHECK_FALSE(archive.extract("huge"));
+  CHECK(CatIndex::parse("a -1 1 aa\nb 12oops 1 bb\n").entries().empty());
+  CHECK(CatIndex::parse("a 18446744073709551615 1 aa\nb 1 1 bb\n").entries().empty());
+  fs::remove(dir / "01.cat");
+  fs::remove(dir / "01.dat");
+  fs::remove(dir);
+}
 
 TEST_CASE("CatIndex computes cumulative offsets and skips malformed lines") {
   const std::string cat =

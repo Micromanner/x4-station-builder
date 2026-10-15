@@ -30,6 +30,9 @@ struct PaletteAction {
   std::string id;       // valid when kind == AdjustCart (cart key — the module id)
   int delta{0};         // valid when kind == AdjustCart (+/-1 or +/-10)
   std::string faction;  // valid when kind == SetFaction
+  // Module row under the pointer this frame, any kind: lets the caller start
+  // streaming its meshes before the click.
+  std::string hoveredId;
 };
 
 [[nodiscard]] float paletteWidth();

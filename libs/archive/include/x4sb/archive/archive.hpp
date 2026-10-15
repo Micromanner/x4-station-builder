@@ -5,6 +5,7 @@
 // raw file bytes concatenated in index order, so an entry's byte offset is the
 // cumulative sum of the sizes before it.
 #include <cstdint>
+#include <memory>
 #include <optional>
 #include <string>
 #include <unordered_map>
@@ -56,23 +57,28 @@ class Archive {
   // nullopt if the path is unknown or the .dat read fails. Lookups are
   // case-insensitive, matching X4's case-insensitive virtual file system (a
   // component XML may name a part camelCase while the .cat ships it lower-cased).
-  std::optional<std::string> extract(const std::string& path) const;
+  // Concurrent extract/contains calls are supported after indexing is complete;
+  // addCatalog/addInstall must not run concurrently with reads.
+  [[nodiscard]] std::optional<std::string> extract(const std::string& path) const;
 
   [[nodiscard]] bool contains(const std::string& path) const;
-  std::size_t fileCount() const { return index_.size(); }
+  [[nodiscard]] std::size_t fileCount() const { return index_.size(); }
 
   // Returns the distinct logical-path prefixes indexed so far, in first-seen
   // order. `""` for the base game; `"extensions/<dlc>/"` for each DLC.
   [[nodiscard]] const std::vector<std::string>& sources() const { return sources_; }
+  [[nodiscard]] const std::vector<std::string>& catalogPaths() const { return catalogPaths_; }
 
  private:
+  class File;
   struct Source {
-    std::string datPath;
+    std::shared_ptr<const File> file;
     std::uint64_t offset{0};
     std::uint64_t size{0};
   };
   std::unordered_map<std::string, Source> index_;  // logical path -> .dat slice
   std::vector<std::string> sources_;               // distinct prefixes, load order
+  std::vector<std::string> catalogPaths_;
 };
 
 }  // namespace x4sb

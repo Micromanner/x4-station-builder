@@ -1,9 +1,11 @@
 #include "gizmoshot.hpp"
 
-#include "app_paths.hpp"
+#include "bloom.hpp"
 #include "camera_math.hpp"  // zoomTowardCursor, cameraBasis
 #include "input.hpp"        // gizmoScaleFor
 #include "mesh_cache.hpp"
+#include "mesh_load.hpp"
+#include "native_assets.hpp"
 #include "raylib.h"
 #include "raylib_convert.hpp"  // toRl
 #include "render.hpp"
@@ -31,11 +33,10 @@ constexpr int kScreenW = 1280;
 constexpr int kScreenH = 720;
 constexpr const char* kPreferredMacro = "struct_arg_cross_01_macro";
 
-[[nodiscard]] bool allMeshesExist(const ModuleDef& def, const std::filesystem::path& assetRoot) {
+[[nodiscard]] bool allMeshesExist(const ModuleDef& def, const NativeAssets& native) {
   if (def.meshRefs.empty()) return false;
   for (const MeshRef& ref : def.meshRefs) {
-    std::error_code ec;
-    if (!std::filesystem::exists(assetRoot / ref.gltfPath, ec) || ec) return false;
+    if (!native.archive->contains(ref.xmfPath)) return false;
   }
   return true;
 }
@@ -43,9 +44,9 @@ constexpr const char* kPreferredMacro = "struct_arg_cross_01_macro";
 // Prefer the 6-connector cross hub (visually busy, good for the eyeball test); else
 // the first id-sorted module whose meshes all exist on disk.
 [[nodiscard]] const ModuleDef* pickModule(const ModuleCatalog& catalog,
-                                          const std::filesystem::path& assetRoot) {
+                                          const NativeAssets& native) {
   if (const ModuleDef* preferred = catalog.find(kPreferredMacro);
-      preferred != nullptr && allMeshesExist(*preferred, assetRoot)) {
+      preferred != nullptr && allMeshesExist(*preferred, native)) {
     return preferred;
   }
   std::vector<const ModuleDef*> defs;
@@ -54,17 +55,19 @@ constexpr const char* kPreferredMacro = "struct_arg_cross_01_macro";
   std::sort(defs.begin(), defs.end(),
             [](const ModuleDef* a, const ModuleDef* b) { return a->id < b->id; });
   for (const ModuleDef* def : defs)
-    if (allMeshesExist(*def, assetRoot)) return def;
+    if (allMeshesExist(*def, native)) return def;
   return nullptr;
 }
 
 // Render one frame of the editor state (gizmo included) and capture it.
 void shoot(const EditorState& state, const ::Camera3D& camera, MeshCache& meshes,
-           const std::string& outPath) {
+           FramePipeline& pipeline, const std::string& outPath) {
   for (int i = 0; i < 3; ++i) {  // warm-up so the captured framebuffer is clean
     BeginDrawing();
+    pipeline.begin();
     ClearBackground(::Color{30, 30, 38, 255});
     drawScene(state, camera, meshes, /*showGizmos=*/true, /*showMeshes=*/true);
+    pipeline.end();
     EndDrawing();
   }
   TakeScreenshot(outPath.c_str());
@@ -138,17 +141,8 @@ void sweep(const EditorState& state, ::Vector3 moduleDisp, double cursorNdcX, do
   std::printf("  armPx range: %.1f .. %.1f  (ratio %.2fx)\n", minPx, maxPx, maxPx / minPx);
 }
 
-int runGizmoSweep() {
-  const std::optional<std::string> catalogPath = findCatalogJson();
-  if (!catalogPath) {
-    std::fprintf(stderr, "gizmosweep: no catalog.json\n");
-    return 1;
-  }
-  std::optional<ModuleCatalog> catalog = ModuleCatalog::loadFromFile(*catalogPath);
-  if (!catalog) {
-    std::fprintf(stderr, "gizmosweep: failed to load catalog\n");
-    return 1;
-  }
+int runGizmoSweep(const NativeAssets& native) {
+  const ModuleCatalog* catalog = &native.catalog;
   InitWindow(kScreenW, kScreenH, "gizmosweep");
   {
     EditorState state(*catalog);
@@ -169,19 +163,9 @@ int runGizmoSweep() {
   return 0;
 }
 
-int runGizmoShot(const std::string& outPrefix) {
-  const std::optional<std::string> catalogPath = findCatalogJson();
-  if (!catalogPath) {
-    std::fprintf(stderr, "gizmoshot: could not find asset-cache/catalog.json\n");
-    return 1;
-  }
-  std::optional<ModuleCatalog> catalog = ModuleCatalog::loadFromFile(*catalogPath);
-  if (!catalog) {
-    std::fprintf(stderr, "gizmoshot: failed to load catalog %s\n", catalogPath->c_str());
-    return 1;
-  }
-  const std::filesystem::path assetRoot = std::filesystem::path(*catalogPath).parent_path();
-  const ModuleDef* def = pickModule(*catalog, assetRoot);
+int runGizmoShot(const NativeAssets& native, const std::string& outPrefix) {
+  const ModuleCatalog* catalog = &native.catalog;
+  const ModuleDef* def = pickModule(*catalog, native);
   if (def == nullptr) {
     std::fprintf(stderr, "gizmoshot: no module with on-disk meshes found\n");
     return 1;
@@ -190,7 +174,8 @@ int runGizmoShot(const std::string& outPrefix) {
   InitWindow(kScreenW, kScreenH, "X4 Station Builder - gizmoshot");
   SetTargetFPS(60);
   {
-    MeshCache meshes{assetRoot};
+    MeshCache meshes{native};
+    FramePipeline pipeline;
 
     // One module at the identity transform, then select it (the gizmo only draws
     // for a selection). loadStation resets selection; selectByRay re-picks it.
@@ -202,6 +187,9 @@ int runGizmoShot(const std::string& outPrefix) {
     station.add(pm);
     state.loadStation(std::move(station));
     const std::optional<InstanceId> sel = state.selectByRay(Vec3{0, 1e6, 0}, Vec3{0, -1, 0});
+    // Streaming is budgeted per frame; without this the warm-up frames catch
+    // only the small parts and the hull is missing from the shots.
+    loadStationMeshes(state.station(), *catalog, meshes);
 
     // Frame the module from a 3/4 angle. Scene flips Z, so the camera lives in
     // display space (negate the X4 center's Z).
@@ -222,7 +210,7 @@ int runGizmoShot(const std::string& outPrefix) {
                 sel ? "yes" : "NO", r, scale);
 
     // (1) Idle gizmo: rings, plane handles, arrows, orientation triad all visible.
-    shoot(state, camera, meshes, outPrefix + "_idle.png");
+    shoot(state, camera, meshes, pipeline, outPrefix + "_idle.png");
 
     // (2) Mid translate-drag: grab +X (ray down onto the axis at 0.6*scale), drag it
     // out by ~1.5*radius. The selected mesh must move LIVE to the preview pose.
@@ -230,7 +218,7 @@ int runGizmoShot(const std::string& outPrefix) {
     if (state.beginGizmoDrag(Vec3{px, 1e6, 0}, Vec3{0, -1, 0}, scale)) {
       const double moved = px + 1.5 * r;
       state.updateGizmoDrag(Vec3{moved, 1e6, 0}, Vec3{0, -1, 0}, /*forceFree=*/true);
-      shoot(state, camera, meshes, outPrefix + "_move.png");
+      shoot(state, camera, meshes, pipeline, outPrefix + "_move.png");
       state.cancelGizmoDrag();
     } else {
       std::printf("gizmoshot: translate grab MISSED (no _move.png)\n");
@@ -241,7 +229,7 @@ int runGizmoShot(const std::string& outPrefix) {
     const double s = scale * 0.70710678;
     if (state.beginGizmoDrag(Vec3{s, 1e6, s}, Vec3{0, -1, 0}, scale)) {
       state.updateGizmoDrag(Vec3{scale, 1e6, 0}, Vec3{0, -1, 0}, /*forceFree=*/true);
-      shoot(state, camera, meshes, outPrefix + "_rotate.png");
+      shoot(state, camera, meshes, pipeline, outPrefix + "_rotate.png");
       state.cancelGizmoDrag();
     } else {
       std::printf("gizmoshot: rotate grab MISSED (no _rotate.png)\n");

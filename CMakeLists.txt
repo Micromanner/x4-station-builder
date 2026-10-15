@@ -35,7 +35,7 @@ endif()
 
 # ── Options ─────────────────────────────────────────────────────────────────
 # The editor pulls in raylib (a large FetchContent build). Turn it OFF to build
-# only the render-free libs, the pipeline CLI, and the tests.
+# only the render-free libs, the layoutlab CLI, and the tests.
 option(X4SB_BUILD_EDITOR "Build the raylib/raygui editor app" ON)
 option(X4SB_BUILD_TESTS  "Build unit tests (doctest)"          ON)
 # Tracy frame profiler: compiles + links the vendored client into the editor and
@@ -80,7 +80,7 @@ link_libraries(x4sb::warnings x4sb::sanitizers)
 
 # ── Project units ───────────────────────────────────────────────────────────
 add_subdirectory(libs)   # pure logic; never links raylib
-add_subdirectory(apps)   # editor (raylib) + pipeline (CLI)
+add_subdirectory(apps)   # editor (raylib) + layoutlab (CLI)
 
 if(X4SB_BUILD_TESTS)
   enable_testing()

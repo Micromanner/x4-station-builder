@@ -1,8 +1,8 @@
 #pragma once
-// x4sb (double, X4 native space) <-> raylib (float) conversions. The scene is
-// flipped as a whole via rlScalef(1,1,-1) in the renderer, so geometry is built
-// in NATIVE X4 coords here — no per-vector flip. raylib's Quaternion is laid out
-// {x,y,z,w}; x4sb's Quat is {w,x,y,z}.
+// x4sb (double, X4 native space) <-> raylib (float) conversions. The renderer
+// operates in right-handed display space, so `toRlMatrix` applies a Z-flip to
+// map native X4 coords into display space. Debug primitives manually apply `flipZ`.
+// raylib's Quaternion is laid out {x,y,z,w}; x4sb's Quat is {w,x,y,z}.
 #include "raylib.h"
 #include "raymath.h"
 #include "x4sb/data/math.hpp"
@@ -18,13 +18,14 @@ namespace x4sb::editor {
 }
 
 // Model matrix (rotation then translation) from an x4sb rigid Transform.
+// Output is in right-handed display space (Z-flipped from X4 space).
 [[nodiscard]] inline ::Matrix toRlMatrix(const Transform& t) {
-  const ::Quaternion q{static_cast<float>(t.rotation.x), static_cast<float>(t.rotation.y),
+  const ::Quaternion q{static_cast<float>(-t.rotation.x), static_cast<float>(-t.rotation.y),
                        static_cast<float>(t.rotation.z), static_cast<float>(t.rotation.w)};
   const ::Matrix rot = QuaternionToMatrix(q);
   const ::Matrix trans =
       MatrixTranslate(static_cast<float>(t.position.x), static_cast<float>(t.position.y),
-                      static_cast<float>(t.position.z));
+                      static_cast<float>(-t.position.z));
   return MatrixMultiply(rot, trans);
 }
 

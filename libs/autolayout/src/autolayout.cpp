@@ -118,10 +118,9 @@ AutoLayoutResult autoLayout(const Station& existing, const QuantityList& cart,
   const RoleSplit split = splitRoles(oc, catalog);
 
   Station work = existing;
-  result.report.connectorsAdded =
-      opts.mode == LayoutMode::Organic
-          ? organicSeed(work, split.interior, catalog, opts)
-          : fishboneSeed(work, split.interior, catalog, opts);
+  result.report.connectorsAdded = opts.mode == LayoutMode::Organic
+                                      ? organicSeed(work, split.interior, catalog, opts)
+                                      : fishboneSeed(work, split.interior, catalog, opts);
 
   for (const auto& entry : split.peripheralRanked) {
     const ModuleDef* d = catalog.find(entry.second);

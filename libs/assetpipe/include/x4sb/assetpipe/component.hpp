@@ -1,8 +1,9 @@
 #pragma once
 // Asset-pipeline XML parsing (spec §4A / §10.3): turn an X4 module's component &
 // macro XML (extracted from the archives) into the connector transforms and
-// identity the data layer needs. Render-free; the pipeline.exe and tests share it.
+// identity the data layer needs. Render-free; the catalog builder and tests share it.
 #include "x4sb/data/types.hpp"
+#include "x4sb/data/uv_animation.hpp"
 
 #include <functional>
 #include <optional>
@@ -35,11 +36,24 @@ std::vector<ConnectionPoint> snapConnectionPoints(const std::string& componentXm
 // One visual part mesh of a module (a <connection tags="part ...">/<parts>/<part>),
 // with the local offset at which it is mounted on the module.
 struct ComponentPart {
-  std::string name;  // local instance name, e.g. "part_main" or "part_main01"
-  std::string ref;   // cross-ref "<component>.<part>" when the geometry lives in
-                     // another component (pier/dock sub-assemblies); else empty
-  Transform offset{};
+  std::string name;         // local instance name, e.g. "part_main" or "part_main01"
+  std::string ref;          // cross-ref "<component>.<part>" when the geometry lives in
+                            // another component (pier/dock sub-assemblies); else empty
+  Transform offset{};       // component space, composed up the connection `parent` part chain
+  std::string materialRef;  // first material ref from <materials><material ref="..."/></materials>
+  Vec3 sizeMax{};           // <size><max> half-extents; zero when the part declares none.
+                            // Sky-sphere detection keys on this (extent >= 1e8).
+  Vec3 sizeRaw{};           // <size_raw><max>: the body alone where <size> is a swept orbit box
+                            // (Terran moons); zero when absent.
+  UvAnimation uvAnimation;  // texture scroll; empty channels when the part has none
+  DetailClass detail{DetailClass::None};  // from the connection's detail_* tag
+  bool effect{false};                     // an fx_* part (see parseComponentGeometry)
 };
+
+// A part's detail class: the detail_<xs|s|m|l|xl> token of its connection's
+// normalized tags, else its name's "detail_<class>_" prefix (some parts carry the
+// class only in the name), else None.
+[[nodiscard]] DetailClass partDetailClass(const std::string& tags, std::string_view partName);
 
 // A cross-reference part `ref` split into its component and part names.
 struct PartRef {
@@ -69,25 +83,34 @@ struct ComponentGeometry {
 [[nodiscard]] bool isVisualPart(std::string_view partName);
 
 // Parse the geometry source folder and visual part list from a component XML.
-ComponentGeometry parseComponentGeometry(const std::string& componentXml);
+// `withEffects` also keeps the fx_* parts (flagged `effect`): besides glows and
+// lightcones they carry decals and plain surfaces (the Showroom pad markings); the
+// station renderer picks what it can draw per material range.
+ComponentGeometry parseComponentGeometry(const std::string& componentXml, bool withEffects = false);
+
+// The component's authored lights in component space: <layers>/<layer>/<lights>
+// as authored, and each part's own <lights> carried into its connection frame
+// (through the connection `parent` part chain). Malformed or out-of-range lights
+// are dropped. Render-free.
+[[nodiscard]] std::vector<LocalLight> parseComponentLights(const std::string& componentXml);
 
 // The source .xmf path of a visual part's LOD0 mesh, e.g.
-// "<geometryFolder>/part_main-lod0.xmf". The input-side mirror of meshGltfPath:
-// the batch converter and the pipeline CLI derive their source paths through
-// this so the LOD-suffix/join convention lives in exactly one place.
+// "<geometryFolder>/part_main-lod0.xmf". The editor derives the coarser LOD
+// siblings by replacing the "-lod0.xmf" suffix.
 [[nodiscard]] std::string partXmfPath(const std::string& geometryFolder,
                                       const std::string& partName);
-
-// Like partXmfPath but for an explicit LOD level (0 = highest detail), e.g.
-// "<geometryFolder>/part_main-lod2.xmf". The converter probes successive LODs to
-// find the most detailed one that fits raylib's 16-bit mesh-index limit.
-[[nodiscard]] std::string partXmfPathLod(const std::string& geometryFolder,
-                                         const std::string& partName, int lod);
 
 // The module's overall AABB in module-local space: the union of each visual
 // part's <size>/<max> half-extents about <size>/<center>, transformed by the
 // part's mount offset. Returns a zero box if no part declares a <size>.
 [[nodiscard]] AABB moduleAabb(const std::string& componentXml);
+
+// A macro instanced on one of the host component's connections
+// (<macro><connections><connection ref=...><macro ref=...>): docking bays, turrets.
+struct MacroChild {
+  std::string connectionRef;  // the host component connection it mounts on
+  std::string macroRef;
+};
 
 // Identity parsed from a macro XML (<macros>/<macro>).
 struct MacroInfo {
@@ -96,6 +119,7 @@ struct MacroInfo {
   std::string className;               // raw class attr, e.g. "connectionmodule"
   std::string makerRace;               // faction from <identification makerrace=...>, may be empty
   Category category{Category::Other};  // mapped from className
+  std::vector<MacroChild> children;
 };
 MacroInfo parseMacro(const std::string& macroXml);
 

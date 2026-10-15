@@ -3,6 +3,7 @@
 #include <doctest/doctest.h>
 
 #include <algorithm>
+#include <cmath>
 #include <memory>
 #include <unordered_map>
 #include <vector>
@@ -61,6 +62,35 @@ ExtractFn makeFakeInstall() {
 }
 }  // namespace
 
+TEST_CASE("catalog native geometry resolves component cross references and fallback materials") {
+  const auto base = makeFakeInstall();
+  const ExtractFn extract = [base](const std::string& path) -> std::optional<std::string> {
+    if (path == "index/components.xml")
+      return R"(<index>
+        <entry name="prod_arg_foodrations" value="c/prod_comp"/>
+        <entry name="shared_dock" value="c/shared"/>
+      </index>)";
+    if (path == "c/shared.xml")
+      return R"(<components><component><source geometry="extensions/dlc/shared"/></component></components>)";
+    if (path == "c/prod_comp.xml")
+      return R"(<components><component><source geometry="assets/host"/>
+        <connections><connection tags="part"><parts>
+          <part name="part_instance" ref="shared_dock.part_main">
+            <lods><lod><materials><material ref="test.hull"/></materials></lod></lods>
+          </part>
+        </parts></connection></connections>
+      </component></components>)";
+    return base(path);
+  };
+  const auto result = buildModuleCatalog(extract, {""});
+  REQUIRE(result.modules.size() == 1);
+  REQUIRE(result.modules[0].meshRefs.size() == 1);
+  const auto& ref = result.modules[0].meshRefs[0];
+  CHECK(ref.xmfPath == "extensions/dlc/shared/part_main-lod0.xmf");
+  CHECK(ref.materialRef == "test.hull");
+  CHECK(ref.meshKey == "prod_arg_foodrations_macro__part_instance");
+}
+
 TEST_CASE("buildModuleCatalog resolves a module and skips unresolvable ones") {
   const CatalogBuildResult res = buildModuleCatalog(makeFakeInstall(), {""});
   REQUIRE(res.modules.size() == 1);
@@ -76,7 +106,10 @@ TEST_CASE("buildModuleCatalog resolves a module and skips unresolvable ones") {
   CHECK(d.connectionPoints[0].id == "ConnectionSnap001");
   CHECK(d.aabb.max.z == doctest::Approx(30));
   REQUIRE(d.meshRefs.size() == 1);
-  CHECK(d.meshRefs[0].gltfPath == "meshes/prod_arg_foodrations_macro__part_main.gltf");
+  CHECK(d.meshRefs[0].meshKey == "prod_arg_foodrations_macro__part_main");
+  CHECK(d.meshRefs[0].xmfPath == "assets/structures/production/prod_data/part_main-lod0.xmf");
+  CHECK(d.meshRefs[0].radius ==
+        doctest::Approx(std::sqrt(10.0 * 10.0 + 20.0 * 20.0 + 30.0 * 30.0)));
 }
 
 TEST_CASE("buildModuleCatalog returns empty when wares.xml is missing") {
@@ -136,9 +169,12 @@ ExtractFn makeDockInstall() {
   (*files)["index/macros.xml"] = R"(<index>
     <entry name="dock_test_macro" value="m/dock_macro"/>
     <entry name="dockingbay_test_l_macro" value="m/db_macro"/>
+    <entry name="room_test_macro" value="m/room_macro"/>
   </index>)";
   (*files)["index/components.xml"] = R"(<index>
     <entry name="dock_test_comp" value="c/dock_comp"/>
+    <entry name="db_comp" value="c/db_comp"/>
+    <entry name="room_comp" value="c/room_comp"/>
   </index>)";
   (*files)["m/dock_macro.xml"] = R"(<macros>
     <macro name="dock_test_macro" class="buildmodule">
@@ -148,6 +184,9 @@ ExtractFn makeDockInstall() {
         <connection ref="connection_dockingbay01">
           <macro ref="dockingbay_test_l_macro" connection="con_component01"/>
         </connection>
+        <connection ref="connection_room01">
+          <macro ref="room_test_macro" connection="position"/>
+        </connection>
       </connections>
     </macro>
   </macros>)";
@@ -155,7 +194,10 @@ ExtractFn makeDockInstall() {
     <component name="dock_test_comp" class="buildmodule">
       <connections>
         <connection name="connection_dockingbay01" tags="dock_l dockingbay">
-          <offset><position x="0" y="0" z="0"/></offset>
+          <offset><position x="100" y="0" z="0"/></offset>
+        </connection>
+        <connection name="connection_room01" tags="room">
+          <offset><position x="0" y="50" z="0"/></offset>
         </connection>
         <connection name="connection_launchpos01" tags="launchpos">
           <offset><position x="0" y="0" z="0"/></offset>
@@ -172,9 +214,43 @@ ExtractFn makeDockInstall() {
   // The dockingbay child macro carries the <docksize> that names the ship class.
   (*files)["m/db_macro.xml"] = R"(<macros>
     <macro name="dockingbay_test_l_macro" class="dockingbay">
+      <component ref="db_comp"/>
       <properties><docksize tags="dock_l"/></properties>
     </macro>
   </macros>)";
+  (*files)["c/db_comp.xml"] = R"(<components>
+    <component name="db_comp" class="dockingbay">
+      <source geometry="assets\db_data"/>
+      <layers><layer><lights>
+        <omni name="pad" range="40" intensity="1"><offset><position x="1" y="0" z="0"/></offset></omni>
+      </lights></layer></layers>
+      <connections>
+        <connection name="c_pad" tags="part">
+          <offset><position x="0" y="5" z="0"/></offset>
+          <parts><part name="part_pad"/></parts>
+        </connection>
+      </connections>
+    </component>
+  </components>)";
+  (*files)["m/room_macro.xml"] = R"(<macros>
+    <macro name="room_test_macro" class="room">
+      <component ref="room_comp"/>
+    </macro>
+  </macros>)";
+  (*files)["c/room_comp.xml"] = R"(<components>
+    <component name="room_comp" class="room">
+      <source geometry="assets\room_data"/>
+      <connections>
+        <connection name="c_floor" tags="part platformcollision">
+          <offset><position x="0" y="3" z="0"/></offset>
+          <parts><part name="part_main"/></parts>
+        </connection>
+        <connection name="c_walls" tags="collisiononly part">
+          <parts><part name="collisiononly_walls"/></parts>
+        </connection>
+      </connections>
+    </component>
+  </components>)";
   return [files](const std::string& path) -> std::optional<std::string> {
     const auto it = files->find(path);
     if (it == files->end()) return std::nullopt;
@@ -195,6 +271,22 @@ TEST_CASE("buildModuleCatalog populates clearanceVolumes for dock modules") {
   CHECK(d.clearanceVolumes[0].halfExtents.z == doctest::Approx(50000));
   CHECK(d.clearanceVolumes[0].halfExtents.x == doctest::Approx(600));
   CHECK(d.clearanceVolumes[0].center.z == doctest::Approx(50600));
+}
+
+TEST_CASE("buildModuleCatalog mounts child dockingbay and room parts and lights") {
+  const CatalogBuildResult res = buildModuleCatalog(makeDockInstall(), {""});
+  REQUIRE(res.modules.size() == 1);
+  const ModuleDef& d = res.modules[0];
+  REQUIRE(d.meshRefs.size() == 2);  // the room's collision-only walls are dropped
+  CHECK(d.meshRefs[1].meshKey == "room_test_macro__part_main");
+  CHECK(d.meshRefs[1].localTransform.position.y == doctest::Approx(53));
+  // Keyed by the bay macro, so every host shares one cached mesh.
+  CHECK(d.meshRefs[0].meshKey == "dockingbay_test_l_macro__part_pad");
+  CHECK(d.meshRefs[0].xmfPath == "assets/db_data/part_pad-lod0.xmf");
+  CHECK(d.meshRefs[0].localTransform.position.x == doctest::Approx(100));
+  CHECK(d.meshRefs[0].localTransform.position.y == doctest::Approx(5));
+  REQUIRE(d.lights.size() == 1);
+  CHECK(d.lights[0].local.position.x == doctest::Approx(101));
 }
 
 TEST_CASE("buildModuleCatalog merges base and DLC overlays") {

@@ -31,7 +31,12 @@ Transform readOffset(const pugi::xml_node& entry) {
                   p.attribute("z").as_double()};
     t.position = x4ToApp(x4);
   }
-  if (const pugi::xml_node r = off.child("rotation")) {
+  // The game exports rotations it can't express cleanly as <quaternion> instead of
+  // <rotation> (e.g. modules pitched 90 deg), in the same convention as component XML.
+  if (const pugi::xml_node q = off.child("quaternion")) {
+    t.rotation = {q.attribute("qw").as_double(1.0), q.attribute("qx").as_double(),
+                  q.attribute("qy").as_double(), q.attribute("qz").as_double()};
+  } else if (const pugi::xml_node r = off.child("rotation")) {
     t.rotation = quatFromX4Euler(r.attribute("yaw").as_double(), r.attribute("pitch").as_double(),
                                  r.attribute("roll").as_double());
   }

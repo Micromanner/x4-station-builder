@@ -579,7 +579,7 @@ double requiredRowHeight(const ModuleCatalog& catalog, const ModuleDef& hub,
     const ModuleDef* def = catalog.find(id);
     if (def == nullptr) continue;
     for (const auto& cp : hub.connectionPoints) {
-      if (std::abs(cp.localPosition.y) > 10.0) continue; // skip vertical ports
+      if (std::abs(cp.localPosition.y) > 10.0) continue;  // skip vertical ports
       Station tmp;
       PlacedModule h;
       h.defId = hub.id;
@@ -658,7 +658,6 @@ std::vector<std::string> orderedHorizontalPorts(const Station& work, const Modul
   result.insert(result.end(), zPorts.begin(), zPorts.end());
   return result;
 }
-
 
 // Beams needed to bridge one bay of length `pitch` with `beam`; 0 if no beam (chain hubs direct).
 std::size_t beamsForPitch(const ModuleDef* beam, double pitch) {
@@ -762,7 +761,6 @@ std::size_t buildProdLine(Station& work, const ModuleCatalog& catalog, InstanceI
   }
   return placed;
 }
-
 
 }  // namespace
 
@@ -948,8 +946,8 @@ int compactSeed(Station& work, const std::vector<std::string>& interiorOrdered,
   return connectorsAdded;
 }
 
-
-std::size_t measureHubCapacity(const ModuleCatalog& catalog, const ModuleDef& hub, const std::string& moduleType, const AutoLayoutOptions& opts) {
+std::size_t measureHubCapacity(const ModuleCatalog& catalog, const ModuleDef& hub,
+                               const std::string& moduleType, const AutoLayoutOptions& opts) {
   const ModuleDef* def = catalog.find(moduleType);
   if (def == nullptr) return 1;
 
@@ -960,7 +958,7 @@ std::size_t measureHubCapacity(const ModuleCatalog& catalog, const ModuleDef& hu
 
   std::size_t capacity = 0;
   AutoLayoutOptions dummyOpts = opts;
-  dummyOpts.plotHalfExtent = 1e9; // Ignore plot bounds for theoretical measurement
+  dummyOpts.plotHalfExtent = 1e9;  // Ignore plot bounds for theoretical measurement
 
   std::vector<std::string> horiz = orderedHorizontalPorts(tmp, catalog, hid);
   for (const std::string& pid : horiz) {
@@ -994,10 +992,14 @@ int fishboneSeed(Station& work, const std::vector<std::string>& interiorOrdered,
     const ModuleDef* d = catalog.find(id);
     std::string key = id;
     if ((opts.mixRibModules || megaCompaction) && d != nullptr) {
-      if (d->category == Category::Production) key = "category_production";
-      else if (d->category == Category::Storage) key = "category_storage";
-      else if (d->category == Category::Habitat) key = "category_habitat";
-      else if (d->category == Category::Other) key = "category_other";
+      if (d->category == Category::Production)
+        key = "category_production";
+      else if (d->category == Category::Storage)
+        key = "category_storage";
+      else if (d->category == Category::Habitat)
+        key = "category_habitat";
+      else if (d->category == Category::Other)
+        key = "category_other";
     }
     if (keyToModules.find(key) == keyToModules.end()) {
       types.push_back(key);
@@ -1012,7 +1014,8 @@ int fishboneSeed(Station& work, const std::vector<std::string>& interiorOrdered,
     return va > vb;
   });
 
-  const std::string faction = opts.faction.empty() ? factionOf(keyToRepr[types.front()]) : opts.faction;
+  const std::string faction =
+      opts.faction.empty() ? factionOf(keyToRepr[types.front()]) : opts.faction;
   const std::vector<std::string> needTypes = cartPortTypes(valid, catalog);
   const ModuleDef* hub = bestHubFor(catalog, faction, 3, needTypes);
   if (hub == nullptr) return compactSeed(work, interiorOrdered, catalog, opts);
@@ -1032,7 +1035,7 @@ int fishboneSeed(Station& work, const std::vector<std::string>& interiorOrdered,
   };
 
   std::vector<PlannedRib> plannedRibs;
-  const std::size_t maxVerticalHubs = 4; // Max 4 hubs deep per column (-Y)
+  const std::size_t maxVerticalHubs = 4;  // Max 4 hubs deep per column (-Y)
 
   // PLAN THE GRID
   for (const std::string& t : types) {
@@ -1054,7 +1057,7 @@ int fishboneSeed(Station& work, const std::vector<std::string>& interiorOrdered,
       rib.maxReachZ = reachZ;
       rib.maxReachY = reachY;
 
-      const std::size_t maxColsPerRibHalf = 1; 
+      const std::size_t maxColsPerRibHalf = 1;
 
       for (std::size_t c = 0; c < maxColsPerRibHalf && remaining > 0; ++c) {
         std::size_t take = std::min(capacityPerColumn, remaining);
@@ -1111,7 +1114,7 @@ int fishboneSeed(Station& work, const std::vector<std::string>& interiorOrdered,
     double r2_neg = plannedRibs[i].negZColumns.empty() ? 0.0 : plannedRibs[i].maxReachX;
 
     const double hubR = hubPortOffset(*hub, Vec3{1, 0, 0});
-    
+
     auto calcReach = [hubR](bool has1, double r1, bool has2, double r2) {
       if (has1 && has2) return (r1 + r2) * 0.5;
       if (has1) return r1 * 0.5 + hubR;
@@ -1128,7 +1131,8 @@ int fishboneSeed(Station& work, const std::vector<std::string>& interiorOrdered,
     const double target = effectiveReach + kSpineClearance;
     const SpineSpec xS = chooseSpine(catalog, faction, hubTypes, *hub, Vec3{1, 0, 0}, target);
     double spanL = xS.beam != nullptr ? spanLength(*xS.beam) : 0.0;
-    const double xSpacing = 2.0 * hubPortOffset(*hub, Vec3{1, 0, 0}) + static_cast<double>(xS.beams) * spanL;
+    const double xSpacing =
+        2.0 * hubPortOffset(*hub, Vec3{1, 0, 0}) + static_cast<double>(xS.beams) * spanL;
     xOffsets[i] = xOffsets[i - 1] + xSpacing;
     totalLength = xOffsets[i];
   }
@@ -1136,18 +1140,26 @@ int fishboneSeed(Station& work, const std::vector<std::string>& interiorOrdered,
   InstanceId spineTip = firstHubWithFreePort(work, catalog);
   if (spineTip == 0) {
     if (work.empty()) {
-      const double x0 = plannedRibs.empty() ? 0.0 : std::max(-totalLength * 0.5, -opts.plotHalfExtent + hubPortOffset(*hub, Vec3{1, 0, 0}) + 50.0);
+      const double x0 =
+          plannedRibs.empty()
+              ? 0.0
+              : std::max(-totalLength * 0.5,
+                         -opts.plotHalfExtent + hubPortOffset(*hub, Vec3{1, 0, 0}) + 50.0);
       addRoot(work, *hub, Transform{Vec3{x0, skeletonY, 0}, Quat{}});
       spineTip = work.modules().back().instanceId;
       ++connectorsAdded;
-    } else if (trySnap(work, catalog, *hub, opts, true)) { // snap to any hub port
+    } else if (trySnap(work, catalog, *hub, opts, true)) {  // snap to any hub port
       spineTip = work.modules().back().instanceId;
       ++connectorsAdded;
-    } else if (trySnap(work, catalog, *hub, opts, false)) { // snap to any port at all
+    } else if (trySnap(work, catalog, *hub, opts, false)) {  // snap to any port at all
       spineTip = work.modules().back().instanceId;
       ++connectorsAdded;
-    } else { // Degrade to floating
-      const double x0 = plannedRibs.empty() ? 0.0 : std::max(-totalLength * 0.5, -opts.plotHalfExtent + hubPortOffset(*hub, Vec3{1, 0, 0}) + 50.0);
+    } else {  // Degrade to floating
+      const double x0 =
+          plannedRibs.empty()
+              ? 0.0
+              : std::max(-totalLength * 0.5,
+                         -opts.plotHalfExtent + hubPortOffset(*hub, Vec3{1, 0, 0}) + 50.0);
       addRoot(work, *hub, Transform{Vec3{x0, skeletonY, 0}, Quat{}});
       spineTip = work.modules().back().instanceId;
       ++connectorsAdded;
@@ -1159,14 +1171,17 @@ int fishboneSeed(Station& work, const std::vector<std::string>& interiorOrdered,
   for (std::size_t i = 0; i < plannedRibs.size(); ++i) {
     const auto& rib = plannedRibs[i];
     InstanceId spineHub = spineTip;
-    
+
     if (i > 0) {
       const double target = plannedRibs[i - 1].maxReachX + rib.maxReachX + kSpineClearance;
       const SpineSpec xS = chooseSpine(catalog, faction, hubTypes, *hub, Vec3{1, 0, 0}, target);
-      spineHub = growSpine(work, catalog, spineTip, Vec3{1, 0, 0}, xS.beam, xS.beams, *hub, opts, connectorsAdded);
+      spineHub = growSpine(work, catalog, spineTip, Vec3{1, 0, 0}, xS.beam, xS.beams, *hub, opts,
+                           connectorsAdded);
       if (spineHub == 0) {
-        for (const auto& c : rib.posZColumns) for (const auto& id : c.modulesToPlace) leftover.push_back(id);
-        for (const auto& c : rib.negZColumns) for (const auto& id : c.modulesToPlace) leftover.push_back(id);
+        for (const auto& c : rib.posZColumns)
+          for (const auto& id : c.modulesToPlace) leftover.push_back(id);
+        for (const auto& c : rib.negZColumns)
+          for (const auto& id : c.modulesToPlace) leftover.push_back(id);
         continue;
       }
       spineTip = spineHub;
@@ -1177,21 +1192,23 @@ int fishboneSeed(Station& work, const std::vector<std::string>& interiorOrdered,
       for (std::size_t c = 0; c < columns.size(); ++c) {
         const auto& col = columns[c];
         InstanceId currentRibHub = prevRibHub;
-        
-        double zTarget = rib.maxReachZ + kSpineClearance; 
+
+        double zTarget = rib.maxReachZ + kSpineClearance;
         const SpineSpec zS = chooseSpine(catalog, faction, hubTypes, *hub, dir, zTarget);
-        currentRibHub = growSpine(work, catalog, prevRibHub, dir, zS.beam, zS.beams, *hub, opts, connectorsAdded);
+        currentRibHub = growSpine(work, catalog, prevRibHub, dir, zS.beam, zS.beams, *hub, opts,
+                                  connectorsAdded);
 
         if (currentRibHub == 0) {
           for (const auto& id : col.modulesToPlace) leftover.push_back(id);
           continue;
         }
 
-        double vTarget = rib.maxReachY + kSpineClearance; 
+        double vTarget = rib.maxReachY + kSpineClearance;
         const SpineSpec vS = chooseSpine(catalog, faction, hubTypes, *hub, Vec3{0, -1, 0}, vTarget);
         std::size_t defsIndex = 0;
-        buildProdLine(work, catalog, currentRibHub, col.modulesToPlace, defsIndex, col.modulesToPlace.size(), *hub, vS.beam, vS.beams, opts, connectorsAdded);
-        
+        buildProdLine(work, catalog, currentRibHub, col.modulesToPlace, defsIndex,
+                      col.modulesToPlace.size(), *hub, vS.beam, vS.beams, opts, connectorsAdded);
+
         for (std::size_t k = defsIndex; k < col.modulesToPlace.size(); ++k) {
           leftover.push_back(col.modulesToPlace[k]);
         }
@@ -1377,4 +1394,3 @@ InstanceId injectStructureFor(Station& work, const ModuleCatalog& catalog, const
   return injectStructure(work, catalog, hub, span, opts, connectorsAdded, preferHost, extent);
 }
 }  // namespace x4sb
-

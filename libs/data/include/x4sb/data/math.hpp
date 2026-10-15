@@ -9,6 +9,10 @@
 
 namespace x4sb {
 
+struct Vec2 {
+  double x{0}, y{0};
+};
+
 struct Vec3 {
   double x{0}, y{0}, z{0};
 };

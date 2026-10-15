@@ -11,7 +11,7 @@ std::vector<std::string> meshPathsFor(const Station& station, const ModuleCatalo
     const ModuleDef* def = catalog.find(pm.defId);
     if (def == nullptr) continue;
     for (const MeshRef& ref : def->meshRefs) {
-      if (!ref.gltfPath.empty()) unique.insert(ref.gltfPath);
+      if (!ref.meshKey.empty()) unique.insert(ref.meshKey);
     }
   }
   return {unique.begin(), unique.end()};

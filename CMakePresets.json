@@ -5,7 +5,7 @@
     {
       "name": "core",
       "displayName": "Core (no editor)",
-      "description": "Render-free libs + pipeline CLI + tests. No raylib download.",
+      "description": "Render-free libs + layoutlab CLI + tests. No raylib download.",
       "generator": "Ninja",
       "binaryDir": "${sourceDir}/build/core",
       "cacheVariables": {

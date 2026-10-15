@@ -289,11 +289,12 @@ std::string layoutReport(const AutoLayoutResult& result, const ModuleCatalog& ca
       if (overlaps(ai, worldAabb(dj->aabb, mods[j].worldTransform))) {
         ++overlapPairs;
         const AABB aj = worldAabb(dj->aabb, mods[j].worldTransform);
-        std::printf("[DEBUG Overlap] inst%d (%s) AABB min=(%f,%f,%f) max=(%f,%f,%f) overlaps inst%d (%s) AABB min=(%f,%f,%f) max=(%f,%f,%f)\n",
-                    static_cast<int>(mods[i].instanceId), mods[i].defId.c_str(),
-                    ai.min.x, ai.min.y, ai.min.z, ai.max.x, ai.max.y, ai.max.z,
-                    static_cast<int>(mods[j].instanceId), mods[j].defId.c_str(),
-                    aj.min.x, aj.min.y, aj.min.z, aj.max.x, aj.max.y, aj.max.z);
+        std::printf(
+            "[DEBUG Overlap] inst%d (%s) AABB min=(%f,%f,%f) max=(%f,%f,%f) overlaps inst%d (%s) "
+            "AABB min=(%f,%f,%f) max=(%f,%f,%f)\n",
+            static_cast<int>(mods[i].instanceId), mods[i].defId.c_str(), ai.min.x, ai.min.y,
+            ai.min.z, ai.max.x, ai.max.y, ai.max.z, static_cast<int>(mods[j].instanceId),
+            mods[j].defId.c_str(), aj.min.x, aj.min.y, aj.min.z, aj.max.x, aj.max.y, aj.max.z);
       }
     }
   }

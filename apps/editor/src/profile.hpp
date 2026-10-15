@@ -12,6 +12,8 @@
 
 namespace x4sb::editor {
 
-[[nodiscard]] int runProfile(const std::string& planPath, int frames);
+struct NativeAssets;
+
+[[nodiscard]] int runProfile(const NativeAssets& native, const std::string& planPath, int frames);
 
 }  // namespace x4sb::editor

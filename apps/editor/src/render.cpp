@@ -6,6 +6,7 @@
 #include "raylib_convert.hpp"
 #include "rlgl.h"
 #include "ui_category.hpp"  // categoryLabel (shared with the Clay chrome)
+#include "x4sb/data/catalog.hpp"
 #include "x4sb/data/types.hpp"
 #include "x4sb/editorcore/display_flip.hpp"
 #include "x4sb/editorcore/gizmo.hpp"
@@ -14,7 +15,10 @@
 #include <algorithm>
 #include <array>
 #include <cmath>
+#include <cstdarg>
+#include <cstdint>
 #include <cstdio>
+#include <initializer_list>
 #include <optional>
 #include <string>
 #include <unordered_map>
@@ -24,23 +28,55 @@
 namespace x4sb::editor {
 namespace {
 
+std::function<void(ScenePhase)>& scenePhaseHook() {
+  static std::function<void(ScenePhase)> hook;
+  return hook;
+}
+
+std::function<double()>& lodClock() {
+  static std::function<double()> clock;
+  return clock;
+}
+
+[[nodiscard]] double lodNow() { return lodClock() ? lodClock()() : GetTime(); }
+
+struct LodTrace {
+  std::optional<InstanceId> module;
+  std::string text;
+  int frame{0};
+};
+LodTrace& lodTrace() {
+  static LodTrace trace;
+  return trace;
+}
+
+[[nodiscard]] bool tracing(InstanceId id) {
+  const LodTrace& t = lodTrace();
+  return t.module && *t.module == id;
+}
+
+[[gnu::format(printf, 1, 2)]] void traceLine(const char* format, ...) {
+  std::array<char, 512> line{};
+  va_list args;  // NOLINT(cppcoreguidelines-pro-type-vararg)
+  va_start(args, format);
+  std::vsnprintf(line.data(), line.size(), format, args);
+  va_end(args);
+  lodTrace().text += line.data();
+}
+
+void markPhase(ScenePhase phase) {
+  if (const auto& hook = scenePhaseHook()) hook(phase);
+}
+
 bool pointIsLinked(const PlacedModule& m, const std::string& pointId) {
   for (const auto& l : m.links)
     if (l.thisPointId == pointId) return true;
   return false;
 }
 
-// A mesh-ref is the structural hull when its part name (after "__" in the cache
-// path) begins "part". An oversized hull can't render, so the whole module boxes;
-// an oversized detail/anim greeble is merely skipped so the hull still draws.
-bool meshRefIsStructural(const std::string& gltfPath) {
-  const std::size_t sep = gltfPath.rfind("__");
-  return sep != std::string::npos && gltfPath.compare(sep + 2, 4, "part") == 0;
-}
-
 // Opaque so a distant module collapsed to its box still reads against the dark
-// background (a translucent fill vanished — the whole-station "missing modules"
-// bug). Edge brighter than fill so adjacent boxes stay distinguishable.
+// background (a translucent fill vanishes). Edge brighter than fill so adjacent
+// boxes stay distinguishable.
 constexpr ::Color kBoxFill{86, 112, 150, 255};
 constexpr ::Color kBoxEdge{150, 188, 230, 255};
 
@@ -55,8 +91,8 @@ void drawModuleBox(const ModuleDef& def, const Transform& xf, ::Color fill, ::Co
   const Vec3 size = def.aabb.max - def.aabb.min;
   rlPushMatrix();
   rlMultMatrixf(MatrixToFloatV(toRlMatrix(xf)).v);
-  DrawCubeV(toRl(center), toRl(size), fill);
-  DrawCubeWiresV(toRl(center), toRl(size), edge);
+  DrawCubeV(toRl(flipZ(center)), toRl(size), fill);
+  DrawCubeWiresV(toRl(flipZ(center)), toRl(size), edge);
   rlPopMatrix();
 }
 
@@ -106,47 +142,19 @@ void drawClearanceVolume(const ClearanceVolume& cv, const Transform& moduleXf, :
   const Vec3 size{cv.halfExtents.x * 2.0, cv.halfExtents.y * 2.0, length(farEnd - nearEnd)};
   rlPushMatrix();
   rlMultMatrixf(MatrixToFloatV(toRlMatrix(world)).v);
-  DrawCubeV(toRl(Vec3{0, 0, 0}), toRl(size), ::Color{color.r, color.g, color.b, 40});
-  DrawCubeWiresV(toRl(Vec3{0, 0, 0}), toRl(size), color);
+  DrawCubeV(toRl(flipZ(Vec3{0, 0, 0})), toRl(size), ::Color{color.r, color.g, color.b, 40});
+  DrawCubeWiresV(toRl(flipZ(Vec3{0, 0, 0})), toRl(size), color);
   rlPopMatrix();
 }
 
-// Decide whether `def` can render as solid meshes (else the caller boxes it). True
-// only when at least one part is loaded AND no oversized part (>u16 indices, which
-// would render as wrapped-index garbage) is the structural hull — a hull-less module
-// reads as broken, so it boxes; an oversized detail/anim greeble is merely skipped so
-// the hull still draws (most oversized parts are lod0-only greebles the LOD pass can't
-// shrink). Shared by the per-module and instanced paths so their boxing policy can't
-// drift apart.
+// Decide whether `def` can render as solid meshes (else the caller boxes it): true
+// once at least one part is loaded.
 [[nodiscard]] bool canRenderAsMeshes(const ModuleDef& def, MeshCache& meshes) {
   bool anyPresent = false;
-  for (const MeshRef& ref : def.meshRefs) {
-    if (meshes.get(ref.gltfPath) != nullptr)
-      anyPresent = true;
-    else if (meshes.isOversized(ref.gltfPath) && meshRefIsStructural(ref.gltfPath))
-      return false;
-  }
+  // No early exit: partFiles() also queues every part for streaming.
+  for (const MeshRef& ref : def.meshRefs)
+    if (meshes.partFiles(ref).lod[0] != nullptr) anyPresent = true;
   return anyPresent;
-}
-
-// Draw `def`'s glTF parts as SOLID flat-shaded meshes under `xf`, each part nested
-// in its own localTransform. Returns true if at least one mesh drew; false (boxing
-// rule failed, see canRenderAsMeshes) signals the caller to fall back to the AABB
-// box. The caller must have backface culling ENABLED: under the global (1,1,-1) flip
-// the winding is exactly what default back-face culling expects (confirmed
-// empirically), so this both renders correctly and is cheaper than drawing every
-// triangle's back side.
-bool drawModuleMeshes(const ModuleDef& def, const Transform& xf, MeshCache& meshes, ::Color tint) {
-  if (!canRenderAsMeshes(def, meshes)) return false;
-  for (const MeshRef& ref : def.meshRefs) {
-    const ::Model* model = meshes.get(ref.gltfPath);
-    if (model == nullptr) continue;
-    rlPushMatrix();
-    rlMultMatrixf(MatrixToFloatV(toRlMatrix(compose(xf, ref.localTransform))).v);
-    DrawModel(*model, ::Vector3{0, 0, 0}, 1.0f, tint);
-    rlPopMatrix();
-  }
-  return true;
 }
 
 // One connector marker: a sphere at `world` plus its facing-normal stub. Colour
@@ -162,10 +170,10 @@ void drawOneConnector(Vec3 world, Vec3 normal, bool linked, bool lit) {
   // Low-res sphere: a connector marker is a small on-screen dot, but DrawSphere's
   // default 16x16 mesh is regenerated on the CPU per call — at ~80-280 markers/frame
   // on a dense station that was ~3ms. 6x6 is visually identical here, ~7x cheaper.
-  DrawSphereEx(toRl(world), 20.0f, 6, 6, c);
+  DrawSphereEx(toRl(flipZ(world)), 20.0f, 6, 6, c);
   // The connector's local +Z is its facing normal. This MUST stay the same axis
   // the snap solver mates about (snap.cpp `kMate`, spec §3.1).
-  DrawLine3D(toRl(world), toRl(world + normal * 80.0), c);  // X4 scale normal stub
+  DrawLine3D(toRl(flipZ(world)), toRl(flipZ(world + normal * 80.0)), c);  // X4 scale normal stub
 }
 
 // Dashed 3D segment: alternate dash/gap along a->b. The dash count is capped so a
@@ -180,7 +188,7 @@ void drawDashedLine3D(Vec3 a, Vec3 b, ::Color color, double dashLen, double gapL
   double s = 0.0;
   for (int i = 0; i < kMaxDashes && s < total; ++i, s += stride) {
     const double e = std::min(s + dashLen, total);
-    DrawLine3D(toRl(a + dir * s), toRl(a + dir * e), color);
+    DrawLine3D(toRl(flipZ(a + dir * s)), toRl(flipZ(a + dir * e)), color);
   }
 }
 
@@ -188,14 +196,12 @@ void drawDashedLine3D(Vec3 a, Vec3 b, ::Color color, double dashLen, double gapL
 // during the approach (before the instant magnetic snap coincides them). Skipped
 // once coincident. Drawn inside the scene flip, like the gizmo/connectors.
 void drawSnapLink(const EditorState& state) {
-  // One dashed cyan guide-line per possible snap (active connector -> target), each
-  // skipped once coincident (already snapped). Distinct cyan vs the orange connectors.
   constexpr ::Color kSnap{80, 230, 255, 255};
   for (const SnapLink& link : state.activeSnapLinks()) {
     if (length(link.toWorld - link.fromWorld) < 1.0) continue;  // coincident: snapped
     drawDashedLine3D(link.fromWorld, link.toWorld, kSnap, 60.0, 40.0);
-    DrawSphereEx(toRl(link.fromWorld), 28.0F, 6, 6, kSnap);  // low-res: see drawOneConnector
-    DrawSphereEx(toRl(link.toWorld), 28.0F, 6, 6, kSnap);
+    DrawSphereEx(toRl(flipZ(link.fromWorld)), 28.0F, 6, 6, kSnap);  // low-res: see drawOneConnector
+    DrawSphereEx(toRl(flipZ(link.toWorld)), 28.0F, 6, 6, kSnap);
   }
 }
 
@@ -233,8 +239,8 @@ void drawAxisGizmo(const ModuleDef& def, const Transform& xf) {
   const double maxExt = std::max(ext.x, std::max(ext.y, ext.z));
   const double len = 0.6 * maxExt;
   const Vec3 o = xf.position;
-  DrawLine3D(toRl(o), toRl(o + rotate(xf.rotation, Vec3{1, 0, 0}) * len), RED);
-  DrawLine3D(toRl(o), toRl(o + rotate(xf.rotation, Vec3{0, 1, 0}) * len), GREEN);
+  DrawLine3D(toRl(flipZ(o)), toRl(flipZ(o + rotate(xf.rotation, Vec3{1, 0, 0}) * len)), RED);
+  DrawLine3D(toRl(flipZ(o)), toRl(flipZ(o + rotate(xf.rotation, Vec3{0, 1, 0}) * len)), GREEN);
 }
 
 // Depth-precision is the near/far RATIO, not the absolute near plane: a fixed
@@ -249,8 +255,7 @@ struct ClipRange {
 [[nodiscard]] ClipRange sceneClip(const ::Camera3D& cam) {
   const double d = static_cast<double>(Vector3Distance(cam.position, cam.target));
   // 60km far floor covers the 20km plot's diagonal from any inside vantage with
-  // margin (so nothing clips when zoomed in), while staying far tighter than the
-  // old fixed 2e6 — the near/far ratio, hence depth precision, is what matters.
+  // margin (so nothing clips when zoomed in).
   return {std::clamp(d * 0.02, 1.5, 30.0), std::max(d * 4.0, 60000.0)};
 }
 
@@ -260,7 +265,7 @@ void drawDottedLine(::Vector3 start, ::Vector3 end, ::Color color) {
 
 void drawPlotDottedEdges() {
   constexpr float h = 10000.0f;               // Half size
-  const ::Color edgeColor{34, 187, 255, 60};  // Faint Cherenkov blue for the dotted edges
+  const ::Color edgeColor{34, 187, 255, 60};  // Faint Cherenkov blue
 
   // 4 edges along X
   drawDottedLine(::Vector3{-h, -h, -h}, ::Vector3{h, -h, -h}, edgeColor);
@@ -287,18 +292,14 @@ void beginScene(const ::Camera3D& camera) {
 
   BeginMode3D(camera);
   rlPushMatrix();
-  rlScalef(1.0f, 1.0f, -1.0f);  // X4 left-handed -> raylib right-handed (parent §4)
-  rlDisableBackfaceCulling();
 
   // Draw the faint dotted edges of the 20x20x20 km build volume
   drawPlotDottedEdges();
 }
 
 void endScene() {
-  rlDisableBackfaceCulling();  // batched primitives flush at EndMode3D — keep them unculled
   rlPopMatrix();
   EndMode3D();
-  rlEnableBackfaceCulling();  // restore raylib's default for whatever draws next
 }
 
 // Per-module level-of-detail + culling metrics, all in raylib DISPLAY space. The
@@ -309,7 +310,9 @@ struct LodMetrics {
   double along;      // depth along the view direction (negative = behind eye)
   double lateral;    // distance of the center from the view axis
   double radius;     // bounding-sphere radius
-  double pixelSize;  // projected radius in screen pixels (0 if behind)
+  double pixelSize;  // projected radius in screen pixels
+  // pixelSize x this = the size X4's module lod rule sees (kX4ModuleSizeContrib).
+  double ruleScale;
 };
 
 // screenH / (2*tan(fovy/2)): maps a world radius at unit depth to projected
@@ -320,9 +323,16 @@ struct LodMetrics {
          (2.0 * std::tan(static_cast<double>(cam.fovy) * static_cast<double>(DEG2RAD) * 0.5));
 }
 
+// X4's station-module lod rule (renderparam_library.xml dbglodrule_1) has
+// sizecontrib="50": a module is sized half by its own radius, half by its station's,
+// so a module of a big station keeps detail much farther out. Fitted in-game: an Argon
+// L habitat steps to lod1 at ~7.5 km on a ~35-module station, ~15.4 km on the
+// 584-module one, where its own radius alone gives ~2.7 km.
+constexpr double kX4ModuleSizeContrib = 0.5;
+
 // `projF` is projFactor(cam), precomputed once per frame by the caller.
 [[nodiscard]] LodMetrics lodMetrics(const ModuleDef& def, const PlacedModule& pm,
-                                    const ::Camera3D& cam, double projF) {
+                                    const ::Camera3D& cam, double projF, double stationRadius) {
   const AABB wbox = worldAabb(def.aabb, pm.worldTransform);  // X4 space
   const Vec3 c = (wbox.min + wbox.max) * 0.5;
   const double r = length(wbox.max - wbox.min) * 0.5;
@@ -337,8 +347,13 @@ struct LodMetrics {
   const Vec3 rel = dc - camPos;
   const double along = dot(rel, fwd);
   const double lateral = length(rel - fwd * along);
-  const double pixelSize = along > 0 ? (r / along) * projF : 0.0;
-  return {along, lateral, r, pixelSize};
+  // A module whose centre is behind the eye can still fill the view (frustumCull drops
+  // the wholly-behind ones): it must read as huge, not as sub-pixel, or every part
+  // falls under kPartCullPx and the module vanishes as the camera closes in.
+  const double pixelSize = (r / std::max(along, 1.0)) * projF;
+  const double ruleScale =
+      r > 0.0 ? (kX4ModuleSizeContrib * r + (1.0 - kX4ModuleSizeContrib) * stationRadius) / r : 1.0;
+  return {along, lateral, r, pixelSize, ruleScale};
 }
 
 // Per-frame view constants shared by the cull test (so it stays free of trig).
@@ -356,13 +371,53 @@ struct ViewCull {
 
 // Conservative cull: drop a module only when its bounding sphere is wholly behind
 // the eye, wholly past the far plane, or wholly outside a cone that CIRCUMSCRIBES
-// the view frustum (so a corner-of-screen module is never wrongly removed). This
-// replaces the old behind-only cull with a real off-screen reject (the win when
-// zoomed into a big station), without the over-cull risk of an inscribed cone.
+// the view frustum (so a corner-of-screen module is never wrongly removed).
 [[nodiscard]] bool frustumCull(const LodMetrics& m, const ViewCull& v) {
   if (m.along < -m.radius) return true;
   if (m.along - m.radius > v.farC) return true;
   return m.along > 0 && m.lateral > m.along * v.tanDiag + m.radius;
+}
+
+// The view frustum's side and near planes, display space, for shadow-caster culling.
+struct ViewFrustum {
+  Vec3 eye;
+  Vec3 fwd;
+  Vec3 right;
+  Vec3 up;
+  double tanH;
+  double tanV;
+};
+[[nodiscard]] ViewFrustum viewFrustum(const ::Camera3D& cam) {
+  const ::Vector3 fwd = Vector3Normalize(Vector3Subtract(cam.target, cam.position));
+  const ::Vector3 right = Vector3Normalize(Vector3CrossProduct(fwd, cam.up));
+  ViewFrustum f{};
+  f.eye = toVec3(cam.position);
+  f.fwd = toVec3(fwd);
+  f.right = toVec3(right);
+  f.up = cross(f.right, f.fwd);
+  f.tanV = std::tan(static_cast<double>(cam.fovy) * static_cast<double>(DEG2RAD) * 0.5);
+  f.tanH = f.tanV * static_cast<double>(GetScreenWidth()) / static_cast<double>(GetScreenHeight());
+  return f;
+}
+
+// A caster only matters if its shadow can land on something in view. Its bounding
+// sphere swept away from the sun to the cascade's far face is a capsule; the capsule
+// misses the frustum if one plane has both segment ends more than `radius` outside
+// (exact per plane, since the signed distance is linear along the segment).
+[[nodiscard]] bool shadowMissesView(Vec3 center, double radius, const ShadowRegion& region,
+                                    const ViewFrustum& f) {
+  const double sweep = std::max(dot(center - region.center, region.toSun) + region.halfExtent, 0.0);
+  const std::array<Vec3, 2> ends{center - f.eye, center - region.toSun * sweep - f.eye};
+  const auto outside = [&](auto signedDistance) {
+    return signedDistance(ends[0]) < -radius && signedDistance(ends[1]) < -radius;
+  };
+  const double normH = std::sqrt(1.0 + f.tanH * f.tanH);
+  const double normV = std::sqrt(1.0 + f.tanV * f.tanV);
+  return outside([&](Vec3 p) { return dot(p, f.fwd); }) ||
+         outside([&](Vec3 p) { return (dot(p, f.fwd) * f.tanH - dot(p, f.right)) / normH; }) ||
+         outside([&](Vec3 p) { return (dot(p, f.fwd) * f.tanH + dot(p, f.right)) / normH; }) ||
+         outside([&](Vec3 p) { return (dot(p, f.fwd) * f.tanV - dot(p, f.up)) / normV; }) ||
+         outside([&](Vec3 p) { return (dot(p, f.fwd) * f.tanV + dot(p, f.up)) / normV; });
 }
 
 // Tunable pixel threshold: a module whose projected radius is under kMeshPx draws
@@ -379,21 +434,289 @@ constexpr float kMeshPx = 12.0f;
 constexpr double kConnectorDrawRadius = 1000.0;
 constexpr double kMaxConnectorReach = 2500.0;
 
-// Bucket one module's drawable parts for instanced submission. Shares the boxing
-// decision with the per-module path via canRenderAsMeshes (false -> nothing bucketed,
-// caller boxes). On success each present part's model matrix is appended to its
-// per-path bucket, keyed by gltfPath (`<defId>__<part>`), so every placed copy of a
-// module shares a bucket — the repetition an X4 station is built from, collapsed into
-// one draw call per part.
-[[nodiscard]] bool collectModuleInstances(
-    const ModuleDef& def, const Transform& xf, MeshCache& meshes,
-    std::unordered_map<std::string, std::vector<::Matrix>>& buckets) {
+// A level switch dissolves over time, as X4's lod rules do (renderparam_library.xml
+// dbglodrule_1 speed="2.0"): both levels on complementary screen-door masks, then the
+// new one alone. A band of distance instead left a camera parked inside it showing
+// both levels for good, the coarse triangles cutting through the fine ones.
+constexpr double kLodFadeSeconds = 0.5;
+// A switch needs the projected size this far past the cut, so a camera resting on a
+// cut doesn't flip levels.
+constexpr double kLodHysteresis = 0.05;
+// A part unseen this long (culled, off screen) takes its level without a fade.
+constexpr double kLodStaleSeconds = 0.25;
+constexpr int kFadeSteps = 16;  // Bayer 4x4 resolution; also bounds the bucket count
+// Texture scroll stops below this projected MODULE radius (window px): blinking
+// lights and scanline waves minified to a few pixels only read as flicker. Cut per
+// module, not per part, so all of a module's animations stop together (part boxes
+// range from a sign's few metres to position lights spanning the whole module).
+constexpr double kAnimStillPx = 24.0;
+// Parts below this projected radius (window px) are skipped outright, as X4 drops
+// sub-pixel parts: a shipyard's hundreds of docking-bay parts per module otherwise
+// cost full vertex work for nothing visible.
+constexpr double kPartCullPx = 1.5;
+
+// X4 hides detail-class parts (connection tag detail_xs..detail_xl, see DetailClass)
+// by its lod rules (libraries/renderparam_library.xml, dbglodrule_detail_*): shown
+// down to a projected radius of lodradius3, faded out by 2/3 of it, in pixels "for
+// a 1280:720 mainscene". A detail part's box spans its whole module, so a looser cut
+// kept tens of millions of sub-pixel triangles a frame (known-issues 1.5).
+constexpr double kX4LodScreenHeight = 720.0;
+// X4's lod rule for station modules (dbglodrule_1: production, storage, dockarea,
+// pier, ...): the module steps to lod1/2/3 below these projected radii, 720p pixels.
+// Without it the per-part cuts kept ~7 triangles per pixel, which MSAA then shades
+// per covered triangle (fragment invocations 2-2.7x at mid range).
+constexpr std::array<double, 3> kX4ModuleLodRadius{200.0, 100.0, 35.0};
+[[nodiscard]] std::optional<double> detailLodRadius3(DetailClass detail) {
+  switch (detail) {
+    case DetailClass::XS:
+      return 400.0;
+    case DetailClass::S:
+      return 300.0;
+    case DetailClass::M:
+      return 200.0;
+    case DetailClass::L:
+      return 50.0;
+    case DetailClass::XL:
+      return 20.0;
+    case DetailClass::None:
+      break;
+  }
+  return std::nullopt;
+}
+
+// One part's draw for this frame: the level to show, plus (mid-dissolve) the
+// outgoing level on the complementary mask. `fade` is the incoming coverage.
+struct PartLod {
+  const std::string* in{nullptr};
+  const std::string* out{nullptr};
+  float fade{1.0F};
+  bool still{false};  // draw the texture scroll at its rest frame
+};
+
+// One station part's level over time: the level shown, the one it dissolves from.
+struct PartLodState {
+  int level{-1};  // -1 = never picked
+  int from{-1};   // -1 = settled
+  double start{0.0};
+  double seen{0.0};
+};
+// Indexed by station instance; instance ids move when the station changes.
+struct PartLodStates {
+  std::uint64_t revision{~std::uint64_t{0}};
+  std::vector<PartLodState> parts;
+};
+PartLodStates& partLodStates() {
+  static PartLodStates states;
+  return states;
+}
+
+// Which level(s) to draw `ref` at for a module of on-screen size `lod`. `lod`
+// nullptr = full detail (the station-centred far shadow cascade, cached across views).
+// `state` carries the part's level across frames (dissolves, hysteresis); nullptr =
+// the level for this frame alone.
+[[nodiscard]] PartLod partLod(const MeshRef& ref, const LodMetrics* lod, MeshCache& meshes,
+                              PartLodState* state) {
+  PartLod r;
+  if (lod == nullptr) {
+    r.in = meshes.partFiles(ref).lod[0];
+    return r;
+  }
+  const double px = ref.radius > 0.0 && lod->radius > 0.0
+                        ? lod->pixelSize * ref.radius / lod->radius
+                        : lod->pixelSize;
+  if (px < kPartCullPx) return r;
+  r.still = lod->pixelSize < kAnimStillPx;
+  if (const std::optional<double> full = detailLodRadius3(ref.detail)) {
+    const double p720 = px * kX4LodScreenHeight / static_cast<double>(GetScreenHeight());
+    const double gone = *full * 2.0 / 3.0;
+    if (p720 < gone) return r;
+    r.fade = static_cast<float>(std::clamp((p720 - gone) / (*full - gone), 0.0, 1.0));
+  }
+  // Every part takes its module's level, as in X4: coarser levels are probed by the
+  // meshKeyLod convention and a missing one falls back toward lod0.
+  const auto levelAt = [&](double scale) {
+    const double p720 =
+        lod->pixelSize * lod->ruleScale * scale * kX4LodScreenHeight / GetScreenHeight();
+    int level = 0;
+    while (level < 3 && p720 < kX4ModuleLodRadius[static_cast<std::size_t>(level)]) ++level;
+    return level;
+  };
+  int level = levelAt(1.0);
+  const MeshCache::PartFiles& files = meshes.partFiles(ref);
+  if (state != nullptr) {
+    const double now = lodNow();
+    if (state->level < 0 || now - state->seen > kLodStaleSeconds) {
+      state->level = level;
+      state->from = -1;
+    } else if (level != state->level) {
+      // Larger sizes pick finer (lower) levels: keep the shown one while it is still a
+      // pick within the hysteresis either way.
+      const bool keep = state->level >= levelAt(1.0 + kLodHysteresis) &&
+                        state->level <= levelAt(1.0 - kLodHysteresis);
+      if (keep) {
+        level = state->level;
+      } else {
+        state->from = state->level;
+        state->level = level;
+        state->start = now;
+      }
+    }
+    state->seen = now;
+    // A detail part fading by distance already uses the screen-door: it switches cold.
+    if (state->from >= 0 && r.fade >= 1.0F) {
+      const double t = (now - state->start) / kLodFadeSeconds;
+      if (t >= 1.0) {
+        state->from = -1;
+      } else {
+        r.out = files.lod[static_cast<std::size_t>(state->from)];
+        r.fade = static_cast<float>(t);
+      }
+    }
+  }
+  r.in = files.lod[static_cast<std::size_t>(level)];
+  if (r.out != nullptr && r.out == r.in) {  // same file at both levels: nothing to blend
+    r.out = nullptr;
+    r.fade = 1.0F;
+  }
+  return r;
+}
+
+// Instances bucketed by (part file, fade step): quantizing the fade keeps the
+// bucket count bounded while a whole station of one part dissolves at once.
+// Keyed by the cache's own key pointer, so bucketing hashes no strings.
+struct BucketKey {
+  const std::string* path{nullptr};
+  int step{0};
+  bool invert{false};
+  bool still{false};
+  bool operator==(const BucketKey&) const = default;
+};
+struct BucketKeyHash {
+  std::size_t operator()(const BucketKey& k) const {
+    const std::size_t bits = (static_cast<std::size_t>(k.step) << 2) |
+                             (static_cast<std::size_t>(k.invert) << 1) |
+                             static_cast<std::size_t>(k.still);
+    return std::hash<const void*>{}(k.path) ^ (bits * 0x9E3779B97F4A7C15ULL);
+  }
+};
+struct InstanceBucket {
+  std::vector<std::uint32_t> instances;  // into MeshCache's instance buffer
+  float fade{1.0F};
+  std::size_t first{0};    // offset in the uploaded batch (uploadBuckets)
+  std::uint32_t index{0};  // its place in the batch's cull buckets
+};
+using InstanceBuckets = std::unordered_map<BucketKey, InstanceBucket, BucketKeyHash>;
+
+void addInstance(InstanceBuckets& buckets, const std::string& path, float fade, bool invert,
+                 bool still, std::uint32_t instance) {
+  const int step = std::max(1, static_cast<int>(std::lround(fade * kFadeSteps)));
+  // The outgoing level's mask is empty at a full step, but a fade of 1 skips the mask in
+  // the shaders: drawn, it would cover the incoming level solid for the dissolve's last frames.
+  if (invert && step == kFadeSteps) return;
+  InstanceBucket& b = buckets[BucketKey{&path, step, invert, still}];
+  b.fade = static_cast<float>(step) / kFadeSteps;
+  b.instances.push_back(instance);
+}
+
+// One GPU upload for every bucket's visible list; drawBuckets then draws ranges of
+// it. Every pass drawing from these buckets must follow this upload: the next one
+// replaces it. `occlusion`: the main view's batch, culled against its own depth.
+void uploadBuckets(MeshCache& meshes, std::initializer_list<InstanceBuckets*> sets,
+                   bool occlusion = false) {
+  std::vector<std::uint32_t> all;
+  std::vector<MeshCache::VisibleBucket> cull;
+  for (InstanceBuckets* buckets : sets) {
+    for (auto& [key, b] : *buckets) {
+      b.first = all.size();
+      b.index = static_cast<std::uint32_t>(cull.size());
+      if (occlusion)
+        cull.push_back({key.path, b.first, static_cast<std::uint32_t>(b.instances.size())});
+      all.insert(all.end(), b.instances.begin(), b.instances.end());
+    }
+  }
+  meshes.uploadVisible(all, cull);
+}
+
+void drawBuckets(MeshCache& meshes, const InstanceBuckets& buckets, ::Color tint, DrawPass pass) {
+  std::vector<MeshCache::InstancedDraw> draws;
+  draws.reserve(buckets.size());
+  for (const auto& [key, b] : buckets)
+    draws.push_back({key.path, b.first, static_cast<std::uint32_t>(b.instances.size()), b.fade,
+                     key.invert, key.still, b.index});
+  meshes.drawInstanced(draws, tint, pass);
+}
+
+// The world matrix of each of `def`'s parts placed at `xf`, in meshRefs order.
+[[nodiscard]] std::vector<::Matrix> partTransforms(const ModuleDef& def, const Transform& xf) {
+  std::vector<::Matrix> xforms;
+  xforms.reserve(def.meshRefs.size());
+  for (const MeshRef& ref : def.meshRefs)
+    xforms.push_back(toRlMatrix(compose(xf, ref.localTransform)));
+  return xforms;
+}
+
+// MeshCache's station instances follow `station`: one per (module, mesh ref) in
+// station order, rebuilt only when the station changed. Every module loop that
+// indexes them advances its first instance by def->meshRefs.size().
+void syncStationInstances(const Station& station, const ModuleCatalog& catalog, MeshCache& meshes) {
+  if (PartLodStates& lods = partLodStates(); lods.revision != station.revision()) {
+    lods.revision = station.revision();
+    lods.parts.clear();
+  }
+  if (meshes.stationInstancesCurrent(station.revision())) return;
+  ZoneScopedN("instances: rebuild");
+  std::vector<::Matrix> xforms;
+  for (const auto& pm : station.modules()) {
+    const ModuleDef* def = catalog.find(pm.defId);
+    if (def == nullptr) continue;
+    const std::vector<::Matrix> parts = partTransforms(*def, pm.worldTransform);
+    xforms.insert(xforms.end(), parts.begin(), parts.end());
+  }
+  meshes.uploadStationInstances(station.revision(), xforms);
+}
+
+// Buckets `def`'s parts, whose instances start at `firstInstance`, by part file: every
+// placed copy of a module shares a bucket, the repetition an X4 station is built from
+// collapsed into one sub-draw per part range. False (nothing loaded yet) = the caller boxes.
+[[nodiscard]] bool collectModuleInstances(const ModuleDef& def, std::uint32_t firstInstance,
+                                          MeshCache& meshes, InstanceBuckets& buckets,
+                                          const LodMetrics* lod = nullptr,
+                                          double minPartRadius = 0.0,
+                                          const char* tracePass = nullptr) {
   if (!canRenderAsMeshes(def, meshes)) return false;
-  for (const MeshRef& ref : def.meshRefs) {
-    if (meshes.get(ref.gltfPath) == nullptr) continue;
-    buckets[ref.gltfPath].push_back(toRlMatrix(compose(xf, ref.localTransform)));
+  for (std::size_t i = 0; i < def.meshRefs.size(); ++i) {
+    const MeshRef& ref = def.meshRefs[i];
+    if (ref.radius > 0.0 && ref.radius < minPartRadius) continue;
+    const auto instance = firstInstance + static_cast<std::uint32_t>(i);
+    PartLodState* state = nullptr;
+    if (lod != nullptr) {
+      std::vector<PartLodState>& states = partLodStates().parts;
+      if (instance >= states.size()) states.resize(instance + 1);
+      state = &states[instance];
+    }
+    const PartLod pl = partLod(ref, lod, meshes, state);
+    if (tracePass != nullptr)
+      traceLine("  %-6s %-52s level %d from %d fade %.3f in %s out %s\n", tracePass,
+                ref.meshKey.c_str(), state ? state->level : -2, state ? state->from : -2,
+                static_cast<double>(pl.fade), pl.in ? pl.in->c_str() : "-",
+                pl.out ? pl.out->c_str() : "-");
+    if (!pl.in) continue;
+    // Only animated parts split off a still bucket; the rest keep one sub-draw.
+    const bool still = pl.still && meshes.partFiles(ref).animated;
+    addInstance(buckets, *pl.in, pl.fade, false, still, instance);
+    if (pl.out) addInstance(buckets, *pl.out, pl.fade, true, still, instance);
   }
   return true;
+}
+
+// Buckets `def` at full detail at a pose the station doesn't hold (the selection's
+// drag preview, the ghost), through transient instance `slot`. False = box it.
+[[nodiscard]] bool collectTransient(const ModuleDef& def, const Transform& xf,
+                                    MeshCache::TransientSlot slot, MeshCache& meshes,
+                                    InstanceBuckets& buckets) {
+  if (!canRenderAsMeshes(def, meshes)) return false;
+  const auto first = meshes.uploadTransientInstances(slot, partTransforms(def, xf));
+  return first && collectModuleInstances(def, *first, meshes, buckets);
 }
 
 // Draw every placed module at a cost matched to its on-screen size, in two passes
@@ -407,74 +730,153 @@ void drawPlacedModules(const Station& station, const ModuleCatalog& catalog,
                        bool showMeshes, const ::Camera3D& camera, bool allConnectors,
                        std::optional<Transform> selectedPreview,
                        std::optional<AABB> activeAabb = std::nullopt,
-                       const ConnectorGrid* grid = nullptr, bool lodEnabled = true) {
+                       const ConnectorGrid* grid = nullptr, bool lodEnabled = true,
+                       NebulaFog* fog = nullptr) {
   const double projF = projFactor(camera);
   const ViewCull vc = viewCull(camera);
 
   // While the selected module is being gizmo-dragged, draw it at the live preview
   // pose (so the real mesh moves/rotates with the drag) instead of its committed
-  // transform — the AABB-box-only preview gave no real feedback. Cull/LOD in pass 1a
-  // still use the committed pose, which is fine: the selected module is never culled
-  // and always drawn at full detail.
+  // transform. Cull/LOD in pass 1a still use the committed pose, which is fine: the
+  // selected module is never culled and always drawn at full detail.
   const auto xfFor = [&](const PlacedModule& pm, bool sel) -> const Transform& {
     return (sel && selectedPreview) ? *selectedPreview : pm.worldTransform;
   };
 
   // Declared before pass 1 (which fills it) so pass 2 can read it from its own
-  // profiler zone scope. Most modules collapse to a box; size up front.
+  // profiler zone scope.
   std::vector<std::pair<const ModuleDef*, const PlacedModule*>> boxes;
   boxes.reserve(station.modules().size());
+
+  syncStationInstances(station, catalog, meshes);
 
   // Pass 1a: cull + LOD select, bucketing detailed parts by mesh for instancing.
   // Pure CPU (no draw calls) so its Tracy zone isolates the per-module cull/LOD math
   // from the mesh-submission cost in pass 1b. The selected module is held out (it
-  // wants a yellow tint and there is only one) and drawn the per-module way.
-  std::unordered_map<std::string, std::vector<::Matrix>> instances;
+  // wants a yellow tint and its drag-preview pose) and bucketed on its own.
+  InstanceBuckets instances;
+  InstanceBuckets selection;
   const ModuleDef* selDef = nullptr;
   const PlacedModule* selPm = nullptr;
+  LocalLights& lights = meshes.localLights();
+  lights.begin();
+  // The selected module's lights follow its drag-preview pose, added below.
+  lights.addStation(station, catalog, selected);
   {
     ZoneScopedN("modules: cull+lod");
+    const double stationRadius = stationBounds(station, catalog).radius;
+    std::uint32_t nextInstance = 0;
     for (const auto& pm : station.modules()) {
       const ModuleDef* def = catalog.find(pm.defId);
       if (def == nullptr) continue;
+      const std::uint32_t firstInstance = nextInstance;
+      nextInstance += static_cast<std::uint32_t>(def->meshRefs.size());
       const bool sel = selected.has_value() && *selected == pm.instanceId;
-      const LodMetrics lod = lodMetrics(*def, pm, camera, projF);
+      const LodMetrics lod = lodMetrics(*def, pm, camera, projF, stationRadius);
+      const bool traced = tracing(pm.instanceId);
+      if (traced)
+        traceLine("frame %d t=%.3f cam=(%.1f %.1f %.1f) modulePx %.1f rulePx %.1f along %.1f%s\n",
+                  lodTrace().frame++, lodNow(), static_cast<double>(camera.position.x),
+                  static_cast<double>(camera.position.y), static_cast<double>(camera.position.z),
+                  lod.pixelSize, lod.pixelSize * lod.ruleScale, lod.along,
+                  sel ? " SELECTED (full detail)" : (frustumCull(lod, vc) ? " CULLED" : ""));
       if (!sel && frustumCull(lod, vc)) continue;
 
       const bool detailed = sel || !lodEnabled || lod.pixelSize >= static_cast<double>(kMeshPx);
-      if (!(detailed && showMeshes)) {
+      if (traced && !detailed) traceLine("  BOX\n");
+      if (!detailed) {
         boxes.emplace_back(def, &pm);
       } else if (sel) {
         selDef = def;
         selPm = &pm;
-      } else if (!collectModuleInstances(*def, pm.worldTransform, meshes, instances)) {
+        lights.add(*def, xfFor(pm, true));  // the drag-preview pose its mesh draws at
+      } else if (!collectModuleInstances(*def, firstInstance, meshes, instances, &lod, 0.0,
+                                         traced ? "main" : nullptr)) {
         boxes.emplace_back(def, &pm);  // oversized hull / no geometry -> box
       }
     }
   }
+  {
+    ZoneScopedN("lights: commit");
+    meshes.commitLocalLights();
+  }
 
-  // Pass 1b: instanced mesh submission — one DrawMeshInstanced per unique part across
-  // all its placed copies. Backface culling on (correct + cheaper under the flip).
-  // The selected module draws separately for its tint; a structural-oversized one
-  // still boxes.
+  // The selected module's preview-pose parts; a structural-oversized one still boxes.
+  const bool selMeshes =
+      selDef != nullptr && collectTransient(*selDef, xfFor(*selPm, true),
+                                            MeshCache::TransientSlot::Selection, meshes, selection);
+  if (selDef != nullptr && !selMeshes) boxes.emplace_back(selDef, selPm);
+
+  // Pass 1b: instanced mesh submission, one multi-draw per state class with a sub-draw
+  // per unique part range across all its placed copies. Backface culling on (correct + cheaper
+  // under the flip). The selected module draws separately for its tint.
   {
     ZoneScopedN("modules: mesh");
     rlEnableBackfaceCulling();
-    for (const auto& [path, xforms] : instances) meshes.drawInstanced(path, xforms, LIGHTGRAY);
-    if (selDef != nullptr && selPm != nullptr &&
-        !drawModuleMeshes(*selDef, xfFor(*selPm, true), meshes, YELLOW))
-      boxes.emplace_back(selDef, selPm);
-    rlDisableBackfaceCulling();
-  }
-
-  // Pass 2: opaque boxes (batched, unculled) for distant + mesh-less modules.
-  {
-    ZoneScopedN("modules: boxes");
-    for (const auto& [def, pm] : boxes) {
-      const bool sel = selected.has_value() && *selected == pm->instanceId;
-      drawModuleBox(*def, xfFor(*pm, sel), sel ? ::Color{180, 160, 40, 255} : kBoxFill,
-                    sel ? YELLOW : kBoxEdge);
+    if (!showMeshes) rlEnableWireMode();
+    // Opaque + masked first (depth-writing), THEN all additive/blend fx with
+    // depth-write off — fx drawn interleaved would punch holes in later hulls.
+    {
+      ZoneScopedN("mesh: opaque");
+      uploadBuckets(meshes, {&instances, &selection}, /*occlusion=*/true);
+      markPhase(ScenePhase::Prep);
+      if (showMeshes) {
+        ZoneScopedN("mesh: prepass+ssao+resolve");
+        meshes.setCullStepHook([](MeshCache::CullStep step) {
+          markPhase(static_cast<ScenePhase>(static_cast<int>(ScenePhase::GeometryA) +
+                                            static_cast<int>(step)));
+        });
+        meshes.setDepthPrepass(true);
+        drawBuckets(meshes, instances, WHITE, DrawPass::Opaque);
+        meshes.setDepthPrepass(false);
+        markPhase(ScenePhase::Geometry);
+        meshes.computeSsao();
+        markPhase(ScenePhase::Ssao);
+        meshes.resolveVisibility();
+      }
+      markPhase(ScenePhase::Resolve);
+      drawBuckets(meshes, instances, WHITE, DrawPass::Opaque);
+      meshes.setAoEnabled(false);
     }
+    // Not in the prepass: it writes its own depth.
+    meshes.endPrepassDepth();
+    drawBuckets(meshes, selection, YELLOW, DrawPass::Opaque);
+    markPhase(ScenePhase::Forward);
+
+    // Pass 2: opaque boxes (batched, unculled, solid even in wire mode) for distant +
+    // mesh-less modules, before the depth copy so the fog and the fx see them.
+    rlDisableBackfaceCulling();
+    if (!showMeshes) rlDisableWireMode();
+    {
+      ZoneScopedN("modules: boxes");
+      for (const auto& [def, pm] : boxes) {
+        const bool sel = selected.has_value() && *selected == pm->instanceId;
+        drawModuleBox(*def, xfFor(*pm, sel), sel ? ::Color{180, 160, 40, 255} : kBoxFill,
+                      sel ? YELLOW : kBoxEdge);
+      }
+      rlDrawRenderBatchActive();
+    }
+    if (!showMeshes) rlEnableWireMode();
+    {
+      ZoneScopedN("mesh: depthcopy");
+      meshes.captureSceneDepth();
+    }
+    markPhase(ScenePhase::Boxes);
+    // Wire mode would draw the fog's fullscreen triangle as three lines.
+    if (fog != nullptr && showMeshes) {
+      if (const SceneDepthCopy* depth = meshes.sceneDepth()) fog->apply(camera, *depth);
+    }
+    markPhase(ScenePhase::Fog);
+    // X4 draws its additive/blended fx two-sided (X4_SHOWROOM.rdc: NoCull on every
+    // complex_unlit/simple_unlit draw): a lightcone the camera sits inside shows its far
+    // walls, which the station then occludes.
+    if (!meshes.materialTermActive()) {
+      ZoneScopedN("mesh: transparent");
+      drawBuckets(meshes, instances, WHITE, DrawPass::Transparent);
+      drawBuckets(meshes, selection, YELLOW, DrawPass::Transparent);
+    }
+    markPhase(ScenePhase::Transparent);
+    if (!showMeshes) rlDisableWireMode();
   }
 
   // Pass 3: connector markers. The selected module always shows its connectors and
@@ -531,7 +933,7 @@ RenderStats lodStats(const Station& station, const ModuleCatalog& catalog,
     const ModuleDef* def = catalog.find(pm.defId);
     if (def == nullptr) continue;
     ++s.total;
-    const LodMetrics lod = lodMetrics(*def, pm, camera, projF);
+    const LodMetrics lod = lodMetrics(*def, pm, camera, projF, 0.0);
     if (frustumCull(lod, vc)) {
       ++s.culled;
       continue;
@@ -556,13 +958,67 @@ StationBounds stationBounds(const Station& station, const ModuleCatalog& catalog
   return boundsOf(box);
 }
 
+void drawShadowCasters(const Station& station, const ModuleCatalog& catalog, MeshCache& meshes,
+                       double minPartRadius, const ShadowRegion* region,
+                       const ::Camera3D* lodCamera) {
+  ZoneScoped;
+  syncStationInstances(station, catalog, meshes);
+  InstanceBuckets instances;
+  {
+    ZoneScopedN("shadow: collect");
+    const double projF = lodCamera != nullptr ? projFactor(*lodCamera) : 0.0;
+    std::optional<ViewFrustum> frustum;
+    if (lodCamera != nullptr) frustum = viewFrustum(*lodCamera);
+    const double stationRadius = stationBounds(station, catalog).radius;
+    std::uint32_t nextInstance = 0;
+    for (const auto& pm : station.modules()) {
+      const ModuleDef* def = catalog.find(pm.defId);
+      if (def == nullptr) continue;
+      const std::uint32_t firstInstance = nextInstance;
+      nextInstance += static_cast<std::uint32_t>(def->meshRefs.size());
+      if (region != nullptr) {
+        const StationBounds b = boundsOf(worldAabb(def->aabb, pm.worldTransform));
+        const Vec3 d = flipZ(b.center) - region->center;
+        const double reach = region->halfExtent + b.radius;
+        if (std::abs(dot(d, region->right)) > reach || std::abs(dot(d, region->up)) > reach)
+          continue;
+        if (frustum && shadowMissesView(flipZ(b.center), b.radius, *region, *frustum)) continue;
+      }
+      std::optional<LodMetrics> lod;
+      if (lodCamera != nullptr) {
+        lod = lodMetrics(*def, pm, *lodCamera, projF, stationRadius);
+        // A caster the view culls as wholly behind the eye still shadows hulls in view:
+        // size it by distance. Nearer ones keep the view's size, so both passes agree on
+        // the shared PartLodState.
+        if (lod->along < -lod->radius)
+          lod->pixelSize =
+              lod->radius / std::max(std::hypot(lod->along, lod->lateral), 1e-3) * projF;
+      }
+      const bool traced = tracing(pm.instanceId);
+      if (traced)
+        traceLine(" shadow cascade re-render at t=%.3f%s\n", lodNow(),
+                  lod ? "" : " (full detail, no view LOD)");
+      (void)collectModuleInstances(*def, firstInstance, meshes, instances, lod ? &*lod : nullptr,
+                                   minPartRadius, traced ? "shadow" : nullptr);
+    }
+  }
+  {
+    ZoneScopedN("shadow: draw");
+    uploadBuckets(meshes, {&instances});
+    drawBuckets(meshes, instances, WHITE, DrawPass::Opaque);
+  }
+}
+
 StationBounds boundsOf(const AABB& box) {
   return {box, (box.min + box.max) * 0.5, length(box.max - box.min) * 0.5};
 }
 
 void drawScene(const EditorState& state, const ::Camera3D& camera, MeshCache& meshes,
-               bool showGizmos, bool showMeshes, bool lodEnabled) {
+               bool showGizmos, bool showMeshes, bool lodEnabled, const SceneSun& sun,
+               NebulaFog* fog) {
   ZoneScoped;
+  meshes.setLighting(sun.dir, sun.color, sun.intensity, sun.ambientColor, sun.ambientIntensity,
+                     camera.position);
   // Reset the per-frame mesh-upload budget here, in drawScene, so EVERY render entry
   // point (the editor loop AND the offscreen --profile/--megashot/--snaptest/--gizmoshot
   // harnesses) gets it — none can forget and stall mesh streaming after the first frame.
@@ -592,7 +1048,7 @@ void drawScene(const EditorState& state, const ::Camera3D& camera, MeshCache& me
       (state.ghost() || state.dragging()) ? &state.connectorGrid() : nullptr;
   drawPlacedModules(state.station(), state.catalog(), state.selected(), meshes, showGizmos,
                     showMeshes, camera, /*allConnectors=*/false, state.dragPreview(), activeAabb,
-                    connGrid, lodEnabled);
+                    connGrid, lodEnabled, fog);
 
   // Draw proximity warning grids on build boundary faces when a module is near them
   AABB worldBox{};
@@ -633,12 +1089,10 @@ void drawScene(const EditorState& state, const ::Camera3D& camera, MeshCache& me
 
       auto drawClippedLine = [](Vec3 p1, Vec3 p2, ::Color color) {
         constexpr double L = 10000.0;
-        // Check if completely outside
         if ((p1.x > L && p2.x > L) || (p1.x < -L && p2.x < -L)) return;
         if ((p1.y > L && p2.y > L) || (p1.y < -L && p2.y < -L)) return;
         if ((p1.z > L && p2.z > L) || (p1.z < -L && p2.z < -L)) return;
 
-        // Clamp endpoints to the plot boundary box
         p1.x = std::clamp(p1.x, -L, L);
         p1.y = std::clamp(p1.y, -L, L);
         p1.z = std::clamp(p1.z, -L, L);
@@ -647,7 +1101,7 @@ void drawScene(const EditorState& state, const ::Camera3D& camera, MeshCache& me
         p2.y = std::clamp(p2.y, -L, L);
         p2.z = std::clamp(p2.z, -L, L);
 
-        DrawLine3D(toRl(p1), toRl(p2), color);
+        DrawLine3D(toRl(flipZ(p1)), toRl(flipZ(p2)), color);
       };
 
       for (int i = 0; i <= steps; ++i) {
@@ -681,7 +1135,6 @@ void drawScene(const EditorState& state, const ::Camera3D& camera, MeshCache& me
     const ::Color normalColor{34, 187, 255, 180};  // Cherenkov Blue
     const ::Color gridColor = normalColor;
 
-    // Check proximity to X planes (+/- 10000) using AABB bounds
     if (std::abs(worldBox.max.x - kPlotLimit) < kThresh) {
       drawFaceGrid(0, kPlotLimit, centerPos.y, centerPos.z, gridColor);
     }
@@ -689,7 +1142,6 @@ void drawScene(const EditorState& state, const ::Camera3D& camera, MeshCache& me
       drawFaceGrid(0, -kPlotLimit, centerPos.y, centerPos.z, gridColor);
     }
 
-    // Check proximity to Y planes (+/- 10000) using AABB bounds
     if (std::abs(worldBox.max.y - kPlotLimit) < kThresh) {
       drawFaceGrid(1, kPlotLimit, centerPos.x, centerPos.z, gridColor);
     }
@@ -697,7 +1149,6 @@ void drawScene(const EditorState& state, const ::Camera3D& camera, MeshCache& me
       drawFaceGrid(1, -kPlotLimit, centerPos.x, centerPos.z, gridColor);
     }
 
-    // Check proximity to Z planes (+/- 10000) using AABB bounds
     if (std::abs(worldBox.max.z - kPlotLimit) < kThresh) {
       drawFaceGrid(2, kPlotLimit, centerPos.x, centerPos.y, gridColor);
     }
@@ -765,11 +1216,28 @@ void drawScene(const EditorState& state, const ::Camera3D& camera, MeshCache& me
     if (gdef != nullptr) {
       const ::Color fill = state.ghost()->valid ? ::Color{0, 220, 0, 90} : ::Color{220, 0, 0, 90};
       const ::Color edge = state.ghost()->valid ? GREEN : RED;
-      rlEnableBackfaceCulling();
-      const bool drew =
-          showMeshes && drawModuleMeshes(*gdef, state.ghost()->worldTransform, meshes, edge);
-      rlDisableBackfaceCulling();
-      if (!drew) drawModuleBox(*gdef, state.ghost()->worldTransform, fill, edge);
+      // While any part is still streaming (usually already queued by the palette
+      // hover) draw nothing: a box or a half-assembled module flashing for a few
+      // frames reads as a glitch. The box stays for modules that genuinely lack meshes.
+      bool streaming = false;
+      for (const MeshRef& ref : gdef->meshRefs) meshes.request(ref.meshKey, false, /*urgent=*/true);
+      for (const MeshRef& ref : gdef->meshRefs)
+        if (meshes.get(ref.meshKey) == nullptr && !meshes.isResolved(ref.meshKey)) streaming = true;
+      if (!streaming) {
+        rlEnableBackfaceCulling();
+        if (!showMeshes) rlEnableWireMode();
+        InstanceBuckets ghost;
+        const bool drew = collectTransient(*gdef, state.ghost()->worldTransform,
+                                           MeshCache::TransientSlot::Ghost, meshes, ghost);
+        if (drew) {
+          uploadBuckets(meshes, {&ghost});
+          drawBuckets(meshes, ghost, edge, DrawPass::Opaque);
+          drawBuckets(meshes, ghost, edge, DrawPass::Transparent);
+        }
+        if (!showMeshes) rlDisableWireMode();
+        rlDisableBackfaceCulling();
+        if (!drew) drawModuleBox(*gdef, state.ghost()->worldTransform, fill, edge);
+      }
       if (!gdef->clearanceVolumes.empty()) {
         const ::Color col = state.ghost()->valid ? kClearanceGreen : kClearanceRed;
         for (const ClearanceVolume& cv : gdef->clearanceVolumes)
@@ -805,7 +1273,7 @@ void drawGizmo(const EditorState& state, const ::Camera3D& camera) {
 
   const std::optional<GizmoHandle> hl = state.highlightHandle();
   const ::Color kHi{255, 255, 160, 255};  // hovered/active handle lights up
-  const ::Vector3 o = toRl(g.origin);
+  const ::Vector3 o = toRl(flipZ(g.origin));
 
   // X-ray: handles always draw over module geometry so they are never buried in a
   // large mesh. Flush the batch before/after toggling so only gizmo primitives skip
@@ -830,8 +1298,8 @@ void drawGizmo(const EditorState& state, const ::Camera3D& camera) {
     for (const AxisVis& a : axes) {
       const ::Color col = (hl && *hl == a.handle) ? kHi : a.color;
       const Vec3 dir = gizmoAxisDir(a.handle);
-      const ::Vector3 neck = toRl(g.origin + dir * (g.axisLength - headLen));
-      const ::Vector3 tip = toRl(g.origin + dir * g.axisLength);
+      const ::Vector3 neck = toRl(flipZ(g.origin + dir * (g.axisLength - headLen)));
+      const ::Vector3 tip = toRl(flipZ(g.origin + dir * g.axisLength));
       DrawCylinderEx(o, neck, shaftR, shaftR, 10, col);  // shaft
       DrawCylinderEx(neck, tip, headR, 0.0F, 12, col);   // arrowhead
     }
@@ -853,17 +1321,16 @@ void drawGizmo(const EditorState& state, const ::Camera3D& camera) {
       const bool hot = hl && *hl == p.handle;
       const ::Color edge = hot ? kHi : p.color;
       const ::Color fill{edge.r, edge.g, edge.b, static_cast<unsigned char>(hot ? 130 : 60)};
-      const ::Vector3 a = toRl(g.origin + p.u * g.planeSize);
-      const ::Vector3 corner = toRl(g.origin + (p.u + p.v) * g.planeSize);
-      const ::Vector3 c = toRl(g.origin + p.v * g.planeSize);
+      const ::Vector3 a = toRl(flipZ(g.origin + p.u * g.planeSize));
+      const ::Vector3 corner = toRl(flipZ(g.origin + (p.u + p.v) * g.planeSize));
+      const ::Vector3 c = toRl(flipZ(g.origin + p.v * g.planeSize));
       DrawTriangle3D(o, a, corner, fill);
       DrawTriangle3D(o, corner, c, fill);
       DrawLine3D(a, corner, edge);
       DrawLine3D(corner, c, edge);
     }
 
-    // Center free-translate handle: semi-transparent sphere so it no longer blocks
-    // the part origin (was a solid white ball).
+    // Center free-translate handle: semi-transparent so it doesn't hide the part origin.
     const ::Color centerCol =
         (hl && *hl == GizmoHandle::Center) ? kHi : ::Color{255, 255, 255, 120};
     DrawSphere(o, static_cast<float>(g.centerPickRadius), centerCol);
@@ -888,19 +1355,18 @@ void drawGizmo(const EditorState& state, const ::Camera3D& camera) {
 
   rlDrawRenderBatchActive();
   rlEnableDepthTest();
-
-  // The selected module's real mesh tracks the drag preview pose live (see
-  // drawPlacedModules' selectedPreview), so no AABB-box ghost is drawn here.
 }
 
 void drawScene(const Station& station, const ModuleCatalog& catalog, const ::Camera3D& camera,
                MeshCache& meshes, bool showGizmos, bool showMeshes, bool allConnectors,
-               bool lodEnabled) {
+               bool lodEnabled, const SceneSun& sun, NebulaFog* fog) {
   ZoneScoped;
+  meshes.setLighting(sun.dir, sun.color, sun.intensity, sun.ambientColor, sun.ambientIntensity,
+                     camera.position);
   meshes.beginFrame();  // per-frame upload budget reset — see the EditorState drawScene overload
   beginScene(camera);
   drawPlacedModules(station, catalog, std::nullopt, meshes, showGizmos, showMeshes, camera,
-                    allConnectors, std::nullopt, std::nullopt, nullptr, lodEnabled);
+                    allConnectors, std::nullopt, std::nullopt, nullptr, lodEnabled, fog);
   endScene();
 }
 
@@ -930,7 +1396,8 @@ void drawHud(const EditorState& state, int /*screenWidth*/, int /*screenHeight*/
   DrawText(state.cartSummary().c_str(), 12, 76, 16, ::Color{200, 220, 255, 255});
 
   DrawText(
-      "[ / ]=cycle  1=Prod 2=Stor 3=Hab 4=Dock 5=Def 6=Conn 7=Other  0=all  G=gizmos  M=mesh/box",
+      "[ / ]=cycle  1=Prod 2=Stor 3=Hab 4=Dock 5=Def 6=Conn 7=Other  0=all  G=gizmos  M=mesh/box  "
+      "K=sun fx",
       12, 96, 14, GRAY);
   DrawText(
       "LMB=place/select/drag-gizmo   Tab=build/select   T/Y=move/rotate gizmo   "
@@ -951,6 +1418,18 @@ void drawToast(const std::string& message, int screenHeight) {
   const int textW = MeasureText(message.c_str(), fontSize);
   DrawRectangle(x - pad, y - pad, textW + 2 * pad, fontSize + 2 * pad, ::Color{0, 0, 0, 190});
   DrawText(message.c_str(), x, y, fontSize, ::Color{120, 230, 140, 255});
+}
+
+void setScenePhaseHook(std::function<void(ScenePhase)> hook) { scenePhaseHook() = std::move(hook); }
+
+void setLodClock(std::function<double()> clock) { lodClock() = std::move(clock); }
+
+void startLodTrace(InstanceId module) { lodTrace() = {module, {}, 0}; }
+
+std::string stopLodTrace() {
+  std::string text = std::move(lodTrace().text);
+  lodTrace() = {};
+  return text;
 }
 
 }  // namespace x4sb::editor

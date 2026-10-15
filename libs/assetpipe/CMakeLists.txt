@@ -2,15 +2,23 @@
 # Render-free; pipeline.exe is a thin CLI over it.
 add_library(x4sb_assetpipe STATIC
   src/catalogbuild.cpp
-  src/meshconvert.cpp
   src/component.cpp
+  src/clusterbg.cpp
+  src/lensfx.cpp
+  src/sectorindex.cpp
   src/localization.cpp
   src/moduleindex.cpp
   src/wares.cpp
   src/xmf.cpp
-  src/gltf.cpp)
+  src/material_library.cpp
+  src/material_cache.cpp
+  src/metadata_cache.cpp
+  src/native_background.cpp
+  src/nebula_fog.cpp
+  src/dds.cpp
+  src/gunzip.cpp)
 add_library(x4sb::assetpipe ALIAS x4sb_assetpipe)
 target_include_directories(x4sb_assetpipe PUBLIC include)
 target_link_libraries(x4sb_assetpipe
   PUBLIC x4sb_data
-  PRIVATE x4sb_archive pugixml::pugixml nlohmann_json::nlohmann_json sinfl::sinfl)
+  PRIVATE x4sb_archive x4sb_platform pugixml::pugixml nlohmann_json::nlohmann_json sinfl::sinfl)

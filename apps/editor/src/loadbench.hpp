@@ -6,6 +6,8 @@
 // up front (no streaming / no pop-in).
 namespace x4sb::editor {
 
-int runLoadBench(int modules);
+struct NativeAssets;
+
+int runLoadBench(const NativeAssets& native, int modules);
 
 }  // namespace x4sb::editor

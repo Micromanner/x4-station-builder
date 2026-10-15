@@ -8,6 +8,9 @@
 
 namespace x4sb::editor {
 
-[[nodiscard]] int runMegaShot(const std::string& planPath, const std::string& outPrefix);
+struct NativeAssets;
+
+[[nodiscard]] int runMegaShot(const NativeAssets& native, const std::string& planPath,
+                              const std::string& outPrefix);
 
 }  // namespace x4sb::editor

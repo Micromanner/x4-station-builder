@@ -1,9 +1,6 @@
 #pragma once
-// Internal, render-free module-resolution walk shared by the catalog builder and
-// the batch mesh converter (spec §4A). Both consumers MUST derive the same module
-// id and component XML by construction — that is what eliminates the path-scheme
-// drift between catalog.json's meshRefs[].gltfPath and the converter's output
-// paths. This header is private to libs/assetpipe (not installed in include/).
+// Internal, render-free module-resolution walk used by the catalog builder
+// (spec §4A). This header is private to libs/assetpipe (not installed in include/).
 #include "x4sb/assetpipe/catalogbuild.hpp"
 #include "x4sb/assetpipe/component.hpp"
 #include "x4sb/assetpipe/wares.hpp"
@@ -31,6 +28,8 @@ struct ResolvedModule {
   // Resolve a referenced macro's XML bytes by macro name (for child dockingbay
   // macros). Backed by the walk's macro index; valid only during the visit call.
   std::function<std::optional<std::string>(const std::string&)> resolveMacroXml;
+  // Resolve a component's XML bytes by component name (child macros' components).
+  std::function<std::optional<std::string>(const std::string&)> resolveComponentXml;
 };
 
 // Resolve every buildable station module across the given source overlays

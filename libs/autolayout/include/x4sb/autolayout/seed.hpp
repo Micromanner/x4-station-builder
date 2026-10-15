@@ -31,9 +31,10 @@ int fishboneSeed(Station& work, const std::vector<std::string>& interiorOrdered,
 
 // Organic-clustering seed (spec §9.1 organic-clustering): treat functional modules AS the structure
 // — order them cores-first (most ports), chain each onto the most-free open port, and synthesize a
-// structural hub only when free ports run low, a chain gets too long, or a layer needs a new vertical
-// floor. Same signature/contract as compactSeed (returns synthesized Category::Connector count, builds
-// additively). Deterministic (no rng). Degrades to floating when the catalog has no usable hub.
+// structural hub only when free ports run low, a chain gets too long, or a layer needs a new
+// vertical floor. Same signature/contract as compactSeed (returns synthesized Category::Connector
+// count, builds additively). Deterministic (no rng). Degrades to floating when the catalog has no
+// usable hub.
 int organicSeed(Station& work, const std::vector<std::string>& interiorOrdered,
                 const ModuleCatalog& catalog, const AutoLayoutOptions& opts);
 

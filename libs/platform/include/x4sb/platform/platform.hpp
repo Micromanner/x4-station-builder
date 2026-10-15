@@ -34,4 +34,27 @@ std::filesystem::path constructionPlanDir(const std::string& profileId);
 // create the directory.
 [[nodiscard]] std::filesystem::path defaultConstructionPlanDir();
 
+// Per-user config dir for THIS app (not X4's):
+//   Windows: %APPDATA%\x4sb
+//   Linux:   $XDG_CONFIG_HOME/x4sb (default ~/.config/x4sb)
+// Empty if the base location can't be determined.
+[[nodiscard]] std::filesystem::path appConfigDir();
+// Non-roaming metadata cache: LOCALAPPDATA/x4sb or XDG_CACHE_HOME/x4sb.
+[[nodiscard]] std::filesystem::path appCacheDir();
+[[nodiscard]] bool writeFileAtomically(const std::filesystem::path& file, const std::string& bytes);
+
+// settings.json inside appConfigDir; empty when appConfigDir is empty.
+[[nodiscard]] std::filesystem::path settingsFilePath();
+[[nodiscard]] std::string loadGameDirectory(const std::filesystem::path& file);
+[[nodiscard]] bool saveGameDirectory(const std::filesystem::path& file,
+                                     const std::string& directory);
+
+// The "sky" setting: "random" or a sector macro. Missing/malformed file (or an
+// empty/non-string value) degrades to "random" — settings are untrusted disk.
+[[nodiscard]] std::string loadSkySetting(const std::filesystem::path& file);
+
+// Preserves other settings and atomically replaces the file. Creates parent
+// directories. False on unwritable path.
+bool saveSkySetting(const std::filesystem::path& file, const std::string& value);
+
 }  // namespace x4sb::platform

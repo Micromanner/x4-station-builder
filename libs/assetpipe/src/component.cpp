@@ -9,8 +9,11 @@
 #include <array>
 #include <cmath>
 #include <functional>
+#include <limits>
 #include <sstream>
 #include <string_view>
+#include <unordered_map>
+#include <utility>
 
 namespace x4sb {
 namespace {
@@ -58,17 +61,136 @@ Transform parseOffset(const pugi::xml_node& conn) {
   return t;
 }
 
-// Visit every <part> of the first <component>'s "part"-tagged connections,
-// invoking fn(part, connectionOffset, connectionTags). Shared by the geometry
-// and bounding-box passes so their connection/part traversal can't diverge.
-template <typename Fn>
-void forEachComponentPart(const pugi::xml_node& comp, Fn fn) {
+// Real parts author a few dozen keys; the cap bounds a hostile file.
+constexpr std::size_t kMaxUvKeys = 1024;
+
+std::vector<UvKey> parseUvKeys(const pugi::xml_node& prop) {
+  const std::string controller = prop.attribute("controller").as_string();
+  const bool bezier = controller == "bezier_float";
+  if (!bezier && controller != "linear_float") return {};
+  constexpr double kNan = std::numeric_limits<double>::quiet_NaN();
+  std::vector<UvKey> keys;
+  for (const pugi::xml_node k : prop.children("key")) {
+    if (keys.size() == kMaxUvKeys) return {};
+    const double frame = k.attribute("frame").as_double(kNan);
+    const double value = k.attribute("value").as_double(kNan);
+    if (!(std::abs(frame) <= kMaxUvAnimationMagnitude) ||
+        !(std::abs(value) <= kMaxUvAnimationMagnitude))
+      return {};
+    UvInterp interp = UvInterp::Linear;
+    if (bezier) {
+      const std::string_view out = k.attribute("out_tangent_type").as_string();
+      interp = out == "step"     ? UvInterp::Step
+               : out == "linear" ? UvInterp::Linear
+                                 : UvInterp::Smooth;
+    }
+    keys.push_back({frame, value, interp});
+  }
+  std::stable_sort(keys.begin(), keys.end(),
+                   [](const UvKey& a, const UvKey& b) { return a.frame < b.frame; });
+  return keys;
+}
+
+// A part's <uv_animations>; the frame range comes from its connection's "loop"
+// animation, else the keys' own span.
+UvAnimation parseUvAnimation(const pugi::xml_node& part, const std::string& connectionTags) {
+  UvAnimation anim;
+  // Cargo fill, not time, drives these (build storage tiling): at rest they are the identity.
+  if (detail::hasToken(connectionTags, "cargodependent")) return anim;
+  for (const pugi::xml_node a : part.child("uv_animations").children("uv_animation")) {
+    const int uvSet = a.attribute("mapchannel").as_int(0) - 1;  // mapchannel is 1-based
+    if (uvSet < 0 || uvSet >= kUvSets) continue;
+    if (std::any_of(anim.channels.begin(), anim.channels.end(),
+                    [uvSet](const UvChannel& c) { return c.uvSet == uvSet; }))
+      continue;
+    UvChannel c;
+    c.uvSet = uvSet;
+    c.aroundCenter = a.attribute("rotaroundcenter").as_bool();  // "1" and "true" both occur
+    for (const pugi::xml_node prop : a.children("uv_property")) {
+      const std::string_view name = prop.attribute("name").as_string();
+      if (name == "u_offset") c.u = parseUvKeys(prop);
+      if (name == "v_offset") c.v = parseUvKeys(prop);
+      if (name == "rotation_angle") c.rotation = parseUvKeys(prop);
+      if (name == "u_tile") c.uTile = parseUvKeys(prop);
+      if (name == "v_tile") c.vTile = parseUvKeys(prop);
+    }
+    if (!c.u.empty() || !c.v.empty() || !c.rotation.empty() || !c.uTile.empty() || !c.vTile.empty())
+      anim.channels.push_back(std::move(c));
+  }
+  if (anim.channels.empty()) return anim;
+
+  for (const pugi::xml_node a : part.parent().parent().child("animations").children("animation")) {
+    if (std::string_view(a.attribute("name").as_string()) != "loop") continue;
+    const double start = a.attribute("start").as_double();
+    const double end = a.attribute("end").as_double();
+    if (std::isfinite(start) && std::isfinite(end) && end > start) {
+      anim.loopStart = start;
+      anim.loopEnd = end;
+      return anim;
+    }
+  }
+  anim.loopStart = std::numeric_limits<double>::max();
+  anim.loopEnd = std::numeric_limits<double>::lowest();
+  for (const UvChannel& c : anim.channels) {
+    for (const std::vector<UvKey>* keys : {&c.u, &c.v, &c.rotation, &c.uTile, &c.vTile}) {
+      if (keys->empty()) continue;
+      anim.loopStart = std::min(anim.loopStart, keys->front().frame);
+      anim.loopEnd = std::max(anim.loopEnd, keys->back().frame);
+    }
+  }
+  return anim;
+}
+
+// Hostile data could make parents cycle.
+constexpr int kMaxParentDepth = 8;
+
+struct PartFrame {
+  pugi::xml_node part;
+  std::string tags;  // the connection's, normalized
+  Transform frame;   // component space
+};
+
+// Every <part> of every connection with its component-space frame: a connection
+// with a `parent` part is offset relative to that part, so walk up the chain (the
+// refined-metals lava sits in containers mounted on plates; an untagged helper
+// part can be a link).
+std::vector<PartFrame> componentPartFrames(const pugi::xml_node& comp) {
+  struct Link {
+    Transform offset;
+    std::string parent;
+  };
+  std::vector<PartFrame> out;
+  std::vector<Link> links;
+  std::unordered_map<std::string, std::size_t> byName;
   for (const pugi::xml_node c : comp.child("connections").children("connection")) {
     const std::string tags = normalizeTags(c.attribute("tags").as_string());
-    if (!detail::hasToken(tags, "part")) continue;
     const Transform offset = parseOffset(c);
-    for (const pugi::xml_node part : c.child("parts").children("part")) fn(part, offset, tags);
+    for (const pugi::xml_node part : c.child("parts").children("part")) {
+      byName.emplace(part.attribute("name").as_string(), links.size());
+      links.push_back({offset, c.attribute("parent").as_string()});
+      out.push_back({part, tags, offset});
+    }
   }
+  for (std::size_t i = 0; i < out.size(); ++i) {
+    std::string parent = links[i].parent;
+    for (int depth = 0; depth < kMaxParentDepth && !parent.empty(); ++depth) {
+      const auto it = byName.find(parent);
+      if (it == byName.end()) break;
+      const Link& up = links[it->second];
+      out[i].frame = compose(up.offset, out[i].frame);
+      parent = up.parent;
+    }
+  }
+  return out;
+}
+
+// Visit every <part> of the first <component>'s "part"-tagged connections,
+// invoking fn(part, frame, connectionTags). Shared by the geometry and
+// bounding-box passes so their connection/part traversal can't diverge.
+template <typename Fn>
+void forEachComponentPart(const pugi::xml_node& comp, Fn fn) {
+  for (const PartFrame& pf : componentPartFrames(comp))
+    if (detail::hasToken(pf.tags, "part")) fn(pf.part, pf.frame, pf.tags);
 }
 
 // Dock keep-clear box half-extents (metres) per ship class, from X4's
@@ -109,7 +231,77 @@ Quat quatFromUnitZTo(Vec3 dir) {
   return {q.w / n, q.x / n, q.y / n, q.z / n};
 }
 
+// Real components author at most a few hundred; the caps bound a hostile file.
+constexpr std::size_t kMaxLights = 4096;
+constexpr std::size_t kMaxMacroChildren = 1024;
+constexpr double kMaxLightValue = 1e6;
+
+std::optional<LocalLight> parseLight(const pugi::xml_node& n) {
+  const std::string_view tag = n.name();
+  LocalLight l;
+  if (tag == "omni") {
+    l.kind = LightKind::Omni;
+  } else if (tag == "spot") {
+    l.kind = LightKind::Spot;
+  } else if (tag == "box") {
+    l.kind = LightKind::Box;
+  } else if (tag == "arealight") {
+    l.kind = LightKind::Area;
+  } else {
+    return std::nullopt;  // <ambient> and anything unknown
+  }
+  l.local = parseOffset(n);
+  l.color = {n.attribute("r").as_double(255.0), n.attribute("g").as_double(255.0),
+             n.attribute("b").as_double(255.0)};
+  l.intensity = n.attribute("intensity").as_double(1.0);
+  l.specularIntensity = n.attribute("specularintensity").as_double(1.0);
+  l.range = n.attribute("range").as_double(0.0);
+  l.spotAngle = n.attribute("angle").as_double(0.0);
+  l.boxSize = readXyz(n.child("size"));
+  l.areaX = n.attribute("areax").as_double(0.0);
+  l.areaY = n.attribute("areay").as_double(0.0);
+  l.areaRadius = n.attribute("radius").as_double(0.0);
+  l.spotAttenuation = n.attribute("spotattenuation").as_double(0.0);
+
+  const Vec3& p = l.local.position;
+  const Quat& q = l.local.rotation;
+  const std::array<double, 21> values{p.x,         p.y,          p.z,
+                                      q.w,         q.x,          q.y,
+                                      q.z,         l.color.x,    l.color.y,
+                                      l.color.z,   l.intensity,  l.specularIntensity,
+                                      l.range,     l.spotAngle,  l.boxSize.x,
+                                      l.boxSize.y, l.boxSize.z,  l.areaX,
+                                      l.areaY,     l.areaRadius, l.spotAttenuation};
+  // The negated test also rejects NaN.
+  if (!std::all_of(values.begin(), values.end(),
+                   [](double v) { return std::abs(v) <= kMaxLightValue; }))
+    return std::nullopt;
+  return l;
+}
+
 }  // namespace
+
+std::vector<LocalLight> parseComponentLights(const std::string& componentXml) {
+  std::vector<LocalLight> out;
+  pugi::xml_document doc;
+  if (!doc.load_string(componentXml.c_str())) return out;
+  const pugi::xml_node comp = doc.child("components").child("component");
+
+  const auto add = [&out](const pugi::xml_node& lights, const Transform& frame) {
+    for (const pugi::xml_node n : lights.children()) {
+      if (out.size() == kMaxLights) return;
+      if (std::optional<LocalLight> l = parseLight(n)) {
+        l->local = compose(frame, l->local);
+        out.push_back(*l);
+      }
+    }
+  };
+  for (const pugi::xml_node layer : comp.child("layers").children("layer"))
+    add(layer.child("lights"), Transform{});
+
+  for (const PartFrame& pf : componentPartFrames(comp)) add(pf.part.child("lights"), pf.frame);
+  return out;
+}
 
 std::vector<ComponentConnection> parseComponentConnections(const std::string& componentXml) {
   std::vector<ComponentConnection> out;
@@ -145,31 +337,52 @@ std::vector<ConnectionPoint> snapConnectionPoints(const std::string& componentXm
   return out;
 }
 
-bool isVisualPart(std::string_view name) {
+namespace {
+
+bool isEffectPart(std::string_view name) {
+  // The "fx" token can sit under a visual prefix too ("part_fx_lightcones",
+  // "anim_fx_fire"), so match it anywhere as well as the plain "fx_" prefix.
+  return name.substr(0, 3) == "fx_" || name.find("_fx_") != std::string_view::npos;
+}
+
+bool isHelperPart(std::string_view name) {
   const auto startsWith = [name](std::string_view p) { return name.substr(0, p.size()) == p; };
   const auto contains = [name](std::string_view s) {
     return name.find(s) != std::string_view::npos;
   };
-
-  // Effects (decals/glows/fieldlines/lightcones), particle emitters, and
-  // scale/editor dummies never render as solid geometry. The "fx" token can sit
-  // under a visual prefix too ("part_fx_lightcones", "anim_fx_fire"), so match it
-  // anywhere as well as the plain "fx_" prefix.
-  if (startsWith("fx_") || contains("_fx_") || startsWith("emitterfx") ||
-      startsWith("scaledummy") || startsWith("editor")) {
-    return false;
-  }
-  // Pure non-visual volumes (collision/bounds/trigger/darkening). The token can
-  // sit under a visual prefix (e.g. "detail_l_radiator_collisionbox"), so match
-  // it anywhere in the name rather than only as a prefix.
-  if (contains("collisionbox") || contains("bounding") || contains("damagearea") ||
-      contains("triggerpart") || contains("darkening") || name == "geometryinvisible") {
-    return false;
-  }
-  return true;
+  // Particle emitters, scale/editor dummies and pure non-visual volumes
+  // (collision/bounds/trigger/darkening). The volume token can sit under a visual
+  // prefix (e.g. "detail_l_radiator_collisionbox"), so match it anywhere.
+  return startsWith("emitterfx") || startsWith("scaledummy") || startsWith("editor") ||
+         contains("collisionbox") || contains("collisiononly") || contains("bounding") ||
+         contains("damagearea") || contains("triggerpart") || contains("darkening") ||
+         name == "geometryinvisible";
 }
 
-ComponentGeometry parseComponentGeometry(const std::string& componentXml) {
+}  // namespace
+
+bool isVisualPart(std::string_view name) { return !isEffectPart(name) && !isHelperPart(name); }
+
+DetailClass partDetailClass(const std::string& tags, std::string_view partName) {
+  static constexpr std::array<std::pair<const char*, DetailClass>, 5> kClasses{{
+      {"detail_xs", DetailClass::XS},
+      {"detail_s", DetailClass::S},
+      {"detail_m", DetailClass::M},
+      {"detail_l", DetailClass::L},
+      {"detail_xl", DetailClass::XL},
+  }};
+  for (const auto& [token, cls] : kClasses)
+    if (detail::hasToken(tags, token)) return cls;
+  for (const auto& [token, cls] : kClasses) {
+    const std::string_view prefix{token};
+    if (partName.size() > prefix.size() && partName.substr(0, prefix.size()) == prefix &&
+        partName[prefix.size()] == '_')
+      return cls;
+  }
+  return DetailClass::None;
+}
+
+ComponentGeometry parseComponentGeometry(const std::string& componentXml, bool withEffects) {
   ComponentGeometry geo;
   pugi::xml_document doc;
   if (!doc.load_string(componentXml.c_str())) return geo;
@@ -180,16 +393,26 @@ ComponentGeometry parseComponentGeometry(const std::string& componentXml) {
   // Collapse a stray '//' (double-backslash in the source) and trailing '/'.
   geo.geometryFolder = normalizeFolder(folder);
 
-  forEachComponentPart(
-      comp, [&geo](const pugi::xml_node& part, const Transform& offset, const std::string&) {
-        ComponentPart cp;
-        cp.name = part.attribute("name").as_string();
-        cp.ref = part.attribute("ref").as_string();  // xref to a shared sub-assembly, if any
-        cp.offset = offset;
-        // Drop effects and non-visual helpers here, the one chokepoint both the
-        // catalog (mesh-refs) and the converter walk, so neither references them.
-        if (!cp.name.empty() && isVisualPart(cp.name)) geo.parts.push_back(std::move(cp));
-      });
+  forEachComponentPart(comp, [&geo, withEffects](const pugi::xml_node& part,
+                                                 const Transform& offset, const std::string& tags) {
+    ComponentPart cp;
+    cp.name = part.attribute("name").as_string();
+    cp.ref = part.attribute("ref").as_string();  // xref to a shared sub-assembly, if any
+    // The <pivot> shifts the mesh within the connection frame (the <size> box already
+    // includes it, so moduleAabb must not). hab_arg_l_01's details sit 145 m off without it.
+    cp.offset = compose(offset, parseOffset(part.child("pivot")));
+    if (const pugi::xml_node mat =
+            part.child("lods").child("lod").child("materials").child("material")) {
+      cp.materialRef = mat.attribute("ref").as_string();
+    }
+    if (const pugi::xml_node size = part.child("size")) cp.sizeMax = readXyz(size.child("max"));
+    if (const pugi::xml_node raw = part.child("size_raw")) cp.sizeRaw = readXyz(raw.child("max"));
+    cp.uvAnimation = parseUvAnimation(part, tags);
+    cp.detail = partDetailClass(tags, cp.name);
+    cp.effect = isEffectPart(cp.name);
+    if (cp.name.empty() || isHelperPart(cp.name) || (cp.effect && !withEffects)) return;
+    geo.parts.push_back(std::move(cp));
+  });
   return geo;
 }
 
@@ -201,12 +424,7 @@ std::optional<PartRef> parsePartRef(std::string_view ref) {
 }
 
 std::string partXmfPath(const std::string& geometryFolder, const std::string& partName) {
-  return partXmfPathLod(geometryFolder, partName, 0);
-}
-
-std::string partXmfPathLod(const std::string& geometryFolder, const std::string& partName,
-                           int lod) {
-  return geometryFolder + "/" + partName + "-lod" + std::to_string(lod) + ".xmf";
+  return geometryFolder + "/" + partName + "-lod0.xmf";
 }
 
 AABB moduleAabb(const std::string& componentXml) {
@@ -267,6 +485,12 @@ MacroInfo parseMacro(const std::string& macroXml) {
   info.componentRef = macro.child("component").attribute("ref").as_string();
   info.makerRace =
       macro.child("properties").child("identification").attribute("makerrace").as_string();
+  for (const pugi::xml_node c : macro.child("connections").children("connection")) {
+    if (info.children.size() == kMaxMacroChildren) break;
+    MacroChild child{c.attribute("ref").as_string(), c.child("macro").attribute("ref").as_string()};
+    if (!child.connectionRef.empty() && !child.macroRef.empty())
+      info.children.push_back(std::move(child));
+  }
   return info;
 }
 

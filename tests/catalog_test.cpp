@@ -22,8 +22,13 @@ TEST_CASE("toCatalogJson round-trips through loadFromJson") {
   d.connectionPoints.push_back(cp);
 
   MeshRef mr;
-  mr.gltfPath = "meshes/prod_arg_foodrations_macro__part_main.gltf";
+  mr.meshKey = "prod_arg_foodrations_macro__part_main";
   mr.localTransform.position = {1.0, 2.0, 3.0};
+  mr.radius = 42.5;
+  mr.xmfPath = "assets/test/part_main-lod0.xmf";
+  mr.materialRef = "test.hull";
+  mr.detail = DetailClass::XS;
+  mr.effect = true;
   d.meshRefs.push_back(mr);
 
   const ModuleCatalog cat = ModuleCatalog::loadFromJson(toCatalogJson({d}));
@@ -42,8 +47,18 @@ TEST_CASE("toCatalogJson round-trips through loadFromJson") {
   CHECK(r->connectionPoints[0].localPosition.z == doctest::Approx(200.0));
   CHECK(r->connectionPoints[0].localRotation.y == doctest::Approx(-1.0));
   REQUIRE(r->meshRefs.size() == 1);
-  CHECK(r->meshRefs[0].gltfPath == "meshes/prod_arg_foodrations_macro__part_main.gltf");
+  CHECK(r->meshRefs[0].meshKey == "prod_arg_foodrations_macro__part_main");
   CHECK(r->meshRefs[0].localTransform.position.y == doctest::Approx(2.0));
+  CHECK(r->meshRefs[0].radius == doctest::Approx(42.5));
+  CHECK(r->meshRefs[0].xmfPath == mr.xmfPath);
+  CHECK(r->meshRefs[0].materialRef == mr.materialRef);
+  CHECK(r->meshRefs[0].detail == DetailClass::XS);
+  CHECK(r->meshRefs[0].effect);
+}
+
+TEST_CASE("meshKeyLod names the coarser-LOD sibling, lod 0 is the base path") {
+  CHECK(meshKeyLod("a__part_main", 0) == "a__part_main");
+  CHECK(meshKeyLod("a__part_main", 2) == "a__part_main-lod2");
 }
 
 TEST_CASE("loadFromJson defaults playerBuildable to true when absent") {

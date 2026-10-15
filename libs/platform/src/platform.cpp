@@ -1,11 +1,27 @@
 #include "x4sb/platform/platform.hpp"
 
+#include <nlohmann/json.hpp>
+
 #include <algorithm>
 #include <cctype>
+#include <chrono>
 #include <cstdlib>
+#include <fstream>
+#include <random>
+#include <sstream>
 #include <system_error>
 #include <utility>
 #include <vector>
+
+#ifdef _WIN32
+#ifndef NOMINMAX
+#define NOMINMAX
+#endif
+#ifndef WIN32_LEAN_AND_MEAN
+#define WIN32_LEAN_AND_MEAN
+#endif
+#include <windows.h>
+#endif
 
 namespace x4sb::platform {
 namespace {
@@ -83,6 +99,108 @@ std::filesystem::path defaultConstructionPlanDir() {
   const std::vector<std::string> ids = x4ProfileIds();
   if (ids.empty()) return {};
   return constructionPlanDir(ids.front());
+}
+
+std::filesystem::path appConfigDir() {
+#ifdef _WIN32
+  const char* base = std::getenv("APPDATA");
+  if (base == nullptr || *base == '\0') return {};
+  return std::filesystem::path(base) / "x4sb";
+#else
+  if (const char* xdg = std::getenv("XDG_CONFIG_HOME"); xdg != nullptr && *xdg != '\0')
+    return std::filesystem::path(xdg) / "x4sb";
+  const char* home = std::getenv("HOME");
+  if (home == nullptr || *home == '\0') return {};
+  return std::filesystem::path(home) / ".config" / "x4sb";
+#endif
+}
+
+std::filesystem::path settingsFilePath() {
+  const std::filesystem::path dir = appConfigDir();
+  return dir.empty() ? dir : dir / "settings.json";
+}
+
+std::filesystem::path appCacheDir() {
+#ifdef _WIN32
+  const auto base = fromEnv("LOCALAPPDATA");
+  return base.empty() ? base : base / "x4sb";
+#else
+  auto base = fromEnv("XDG_CACHE_HOME");
+  if (base.empty()) {
+    base = fromEnv("HOME");
+    if (base.empty()) return {};
+    base /= ".cache";
+  }
+  return base / "x4sb";
+#endif
+}
+
+bool writeFileAtomically(const std::filesystem::path& file, const std::string& bytes) {
+  if (file.empty()) return false;
+  std::error_code ec;
+  if (!file.parent_path().empty()) std::filesystem::create_directories(file.parent_path(), ec);
+  if (ec) return false;
+  auto temporary = file;
+  temporary += "." + std::to_string(std::chrono::steady_clock::now().time_since_epoch().count()) +
+               "." + std::to_string(std::random_device{}()) + ".tmp";
+  {
+    std::ofstream out(temporary, std::ios::binary | std::ios::trunc);
+    if (!out) return false;
+    out << bytes;
+    out.close();
+    if (!out) {
+      std::filesystem::remove(temporary, ec);
+      return false;
+    }
+  }
+#ifdef _WIN32
+  const bool replaced = MoveFileExW(temporary.c_str(), file.c_str(),
+                                    MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH) != 0;
+#else
+  std::filesystem::rename(temporary, file, ec);
+  const bool replaced = !ec;
+#endif
+  if (!replaced) std::filesystem::remove(temporary, ec);
+  return replaced;
+}
+
+std::string loadSkySetting(const std::filesystem::path& file) {
+  const std::ifstream in(file, std::ios::binary);
+  if (!in) return "random";
+  std::stringstream ss;
+  ss << in.rdbuf();
+  const nlohmann::json doc = nlohmann::json::parse(ss.str(), nullptr, /*allow_exceptions=*/false);
+  if (!doc.is_object()) return "random";
+  const auto it = doc.find("sky");
+  if (it == doc.end() || !it->is_string()) return "random";
+  const std::string v = it->get<std::string>();
+  return v.empty() ? "random" : v;
+}
+
+bool saveSkySetting(const std::filesystem::path& file, const std::string& value) {
+  std::ifstream input(file, std::ios::binary);
+  auto json = input ? nlohmann::json::parse(input, nullptr, false) : nlohmann::json::object();
+  if (!json.is_object()) json = nlohmann::json::object();
+  json["sky"] = value;
+  input.close();
+  return writeFileAtomically(file, json.dump(2));
+}
+
+std::string loadGameDirectory(const std::filesystem::path& file) {
+  std::ifstream input(file, std::ios::binary);
+  if (!input) return {};
+  const auto json = nlohmann::json::parse(input, nullptr, false);
+  if (!json.is_object() || !json.contains("x4Install") || !json["x4Install"].is_string()) return {};
+  return json["x4Install"].get<std::string>();
+}
+
+bool saveGameDirectory(const std::filesystem::path& file, const std::string& directory) {
+  std::ifstream input(file, std::ios::binary);
+  auto json = input ? nlohmann::json::parse(input, nullptr, false) : nlohmann::json::object();
+  if (!json.is_object()) json = nlohmann::json::object();
+  json["x4Install"] = directory;
+  input.close();
+  return writeFileAtomically(file, json.dump(2));
 }
 
 }  // namespace x4sb::platform

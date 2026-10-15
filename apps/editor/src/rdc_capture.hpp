@@ -8,6 +8,8 @@
 
 namespace x4sb::editor {
 
-[[nodiscard]] int runRdcCapture(const std::string& planPath);
+struct NativeAssets;
+
+[[nodiscard]] int runRdcCapture(const NativeAssets& native, const std::string& planPath);
 
 }  // namespace x4sb::editor

@@ -155,6 +155,7 @@ PaletteAction palette(const EditorState& state) {
         const Clay_ElementId rowId = CLAY_IDI("PaletteRow", static_cast<std::uint32_t>(i));
         const bool isActive = i == activeIndex;
         const bool hovered = Clay_PointerOver(rowId);
+        if (hovered) action.hoveredId = def->id;
         if (hovered && IsMouseButtonReleased(MOUSE_BUTTON_LEFT)) {
           action.kind = PaletteActionKind::SetActive;
           action.index = i;

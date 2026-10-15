@@ -53,3 +53,28 @@ TEST_CASE("profileIdsIn is empty (no throw) for a missing dir") {
       platform::profileIdsIn(std::filesystem::temp_directory_path() / "x4sb_missing_zzz");
   CHECK(ids.empty());
 }
+
+TEST_CASE("sky setting round-trips; missing/garbage -> random") {
+  namespace fs = std::filesystem;
+  const fs::path dir = fs::temp_directory_path() / "x4sb_settings_test";
+  fs::remove_all(dir);
+  const fs::path file = dir / "nested" / "settings.json";
+
+  CHECK(x4sb::platform::loadSkySetting(file) == "random");  // missing file
+  CHECK(platform::loadGameDirectory(file).empty());
+  REQUIRE(platform::saveGameDirectory(file, "C:/Games/X4"));
+  REQUIRE(x4sb::platform::saveSkySetting(file, "Cluster_11_Sector001_macro"));
+  CHECK(x4sb::platform::loadSkySetting(file) == "Cluster_11_Sector001_macro");
+  CHECK(platform::loadGameDirectory(file) == "C:/Games/X4");
+  REQUIRE(platform::saveGameDirectory(file, "D:/Games/X4"));
+  CHECK(platform::loadSkySetting(file) == "Cluster_11_Sector001_macro");
+  CHECK(platform::loadGameDirectory(file) == "D:/Games/X4");
+  REQUIRE(x4sb::platform::saveSkySetting(file, "random"));
+  CHECK(x4sb::platform::loadSkySetting(file) == "random");
+
+  std::ofstream(file, std::ios::trunc) << "not json";
+  CHECK(x4sb::platform::loadSkySetting(file) == "random");
+  std::ofstream(file, std::ios::trunc) << R"({"sky": 42})";
+  CHECK(x4sb::platform::loadSkySetting(file) == "random");
+  fs::remove_all(dir);
+}

@@ -6,5 +6,7 @@
 #include <string>
 
 namespace x4sb::editor {
-int runUiShot(const std::string& outPrefix);
+
+struct NativeAssets;
+int runUiShot(const NativeAssets& native, const std::string& outPrefix);
 }  // namespace x4sb::editor

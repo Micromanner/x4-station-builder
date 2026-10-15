@@ -4,23 +4,31 @@
 // drawn outside Mode3D.
 #include "mesh_cache.hpp"
 #include "raylib.h"
+#include "sky.hpp"
 #include "x4sb/data/math.hpp"
 #include "x4sb/editorcore/editor_state.hpp"
 
+#include <array>
+#include <cstddef>
+#include <cstdint>
+#include <functional>
 #include <string>
 
 namespace x4sb::editor {
 
 // Draw the 3D scene (build box, modules, connector markers, ghost, and per-module
 // orientation gizmos when showGizmos). When showMeshes, each module is drawn as a
-// glTF wireframe (via `meshes`), falling back to its AABB box if no mesh loads;
+// solid mesh (via `meshes`), falling back to its AABB box if no mesh loads;
 // when false, always the box. BeginMode3D/EndMode3D are handled inside.
 // `lodEnabled` keeps the distance-LOD box collapse (cheap on huge stations); when
 // false every visible module draws as a full mesh (frustum culling still applies) —
 // the editor default, since a real station is meant to be seen, and mesh instancing
-// makes "all meshes" affordable.
+// makes "all meshes" affordable. A non-null `fog` fogs sky and hulls between the
+// opaque and transparent passes, as X4 orders it.
 void drawScene(const EditorState& state, const ::Camera3D& camera, MeshCache& meshes,
-               bool showGizmos, bool showMeshes, bool lodEnabled = true);
+               bool showGizmos, bool showMeshes, bool lodEnabled = true,
+               const SceneSun& sun = {{1, 1, 1}, {255, 255, 255, 255}, 1.0f},
+               NebulaFog* fog = nullptr);
 
 // Same scene from a raw Station + catalog (no selection, no ghost) — used by the
 // --snaptest / --megashot harnesses so they render through the identical path.
@@ -29,7 +37,38 @@ void drawScene(const EditorState& state, const ::Camera3D& camera, MeshCache& me
 // a big-station shot wants none).
 void drawScene(const Station& station, const ModuleCatalog& catalog, const ::Camera3D& camera,
                MeshCache& meshes, bool showGizmos, bool showMeshes, bool allConnectors = false,
-               bool lodEnabled = true);
+               bool lodEnabled = true,
+               const SceneSun& sun = {{1, 1, 1}, {255, 255, 255, 255}, 1.0f},
+               NebulaFog* fog = nullptr);
+
+// drawScene's pass boundaries, each reported as its pass ends; kScenePhaseNames names the
+// pass ending there. --profile timestamps them; the editor sets no hook.
+enum class ScenePhase : std::uint8_t {
+  Prep,       // cull/LOD + instance upload
+  GeometryA,  // the occlusion cull's phase A draws (hiz spec 2026-10-15)
+  Hiz,
+  Cull,      // phase B cull + command patch
+  Geometry,  // phase B draws (all of the geometry pass without the cull)
+  Ssao,
+  Resolve,
+  Forward,
+  Boxes,
+  Fog,
+  Transparent,
+  Count
+};
+inline constexpr std::array<const char*, static_cast<std::size_t>(ScenePhase::Count)>
+    kScenePhaseNames{
+        "prep",    "geomA",           "hiz", "cull",       "geometry", "ssao", "resolve",
+        "forward", "boxes+depthcopy", "fog", "transparent"};
+void setScenePhaseHook(std::function<void(ScenePhase)> hook);
+// The clock LOD dissolves run on, seconds; empty = wall time. --profile steps it per frame,
+// so an uncapped run dissolves as a paced one does.
+void setLodClock(std::function<double()> clock);
+// Debug trace of one module's per-part LOD decisions, per frame and per pass (the
+// editor's F1 / F2): whether it was culled or boxed, each part's level, fade and drawn files.
+void startLodTrace(InstanceId module);
+[[nodiscard]] std::string stopLodTrace();
 
 // Diagnostic: tally the per-module LOD/cull decisions for a camera without
 // drawing, reusing the exact metrics drawScene uses. Lets a headless harness
@@ -54,6 +93,27 @@ struct StationBounds {
 };
 [[nodiscard]] StationBounds stationBounds(const Station& station, const ModuleCatalog& catalog);
 
+// The light-space cube a shadow cascade covers, display space. Only the two
+// axes across the light cull: depth clamp keeps casters between the cube and the
+// sun in the map.
+struct ShadowRegion {
+  Vec3 center;
+  Vec3 right;
+  Vec3 up;
+  Vec3 toSun;
+  double halfExtent{0.0};
+};
+
+// Sun shadow depth pass body: every placed module's opaque parts, instanced,
+// skipping parts whose radius is under `minPartRadius` (world units) and, given a
+// `region`, modules outside it. Given `lodCamera`, parts take the level the camera
+// view draws them at, so a caster is the same mesh as the hull it shadows, and
+// (with a `region`) casters whose shadow can't reach that view are skipped; without
+// it, full detail. Caller sets up the light camera + MeshCache::setShadowPass.
+void drawShadowCasters(const Station& station, const ModuleCatalog& catalog, MeshCache& meshes,
+                       double minPartRadius, const ShadowRegion* region = nullptr,
+                       const ::Camera3D* lodCamera = nullptr);
+
 // Bounding center + sphere radius of a single AABB (the per-AABB form of
 // StationBounds; `box` is returned unchanged). Shared by stationBounds and the
 // F-key single-selection focus so both use one center/radius convention.
@@ -65,7 +125,7 @@ struct StationBounds {
 // drawn. Call inside BeginMode3D/EndMode3D.
 void drawGizmo(const EditorState& state, const ::Camera3D& camera);
 
-// Draw the 2D HUD overlay (active module, filter, counts, undo state, controls).
+// Draw the 2D HUD overlay (active module, filter, counts, toggles, controls).
 void drawHud(const EditorState& state, int screenWidth, int screenHeight, bool showGizmos);
 
 // Draw a transient status line (plan save/load result) bottom-left, over the HUD.

@@ -1,5 +1,6 @@
 #include "x4sb/planio/plan.hpp"
 
+#include "x4sb/coords/coords.hpp"
 #include "x4sb/data/catalog.hpp"
 
 #include <doctest/doctest.h>
@@ -94,4 +95,24 @@ TEST_CASE("plan survives an import -> export -> import round-trip") {
       CHECK(mb->links[0].otherPointId == ma.links[0].otherPointId);
     }
   }
+}
+
+TEST_CASE("importPlanXml reads a <quaternion> offset (game export for 90-deg pitched modules)") {
+  const char* plan = R"(<plan id="q" name="q" description="">
+  <entry index="1" macro="prod_gen_missilecomponents_macro">
+    <offset>
+      <position x="10" y="0" z="0"/>
+      <quaternion qx="0.707107" qw="0.707107"/>
+    </offset>
+  </entry>
+</plan>)";
+  const auto st = importPlanXml(plan);
+  REQUIRE(st.has_value());
+  const PlacedModule* m = st->find(1);
+  REQUIRE(m != nullptr);
+  checkSameOrientation(m->worldTransform.rotation, quatFromX4Euler(0, 90, 0));
+
+  const auto again = importPlanXml(exportPlanXml(*st, ModuleCatalog{}));
+  REQUIRE(again.has_value());
+  checkSameOrientation(again->find(1)->worldTransform.rotation, m->worldTransform.rotation);
 }

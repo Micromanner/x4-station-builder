@@ -8,9 +8,11 @@
 
 namespace x4sb::editor {
 
+struct NativeAssets;
+
 // modules = synthetic station size; frames = timed frames per configuration.
 // spacingOverride > 0 forces the grid spacing (small = dense station, which is
 // what exposes the big-selection reach blow-up); 0 = auto from the module AABB.
-int runConnBench(int modules, int frames, double spacingOverride = 0.0);
+int runConnBench(const NativeAssets& native, int modules, int frames, double spacingOverride = 0.0);
 
 }  // namespace x4sb::editor

@@ -1,14 +1,17 @@
 #include "snaptest.hpp"
 
-#include "app_paths.hpp"
+#include "bloom.hpp"
 #include "mesh_cache.hpp"
+#include "native_assets.hpp"
 #include "raylib.h"
+#include "raylib_convert.hpp"
 #include "render.hpp"
 #include "x4sb/data/catalog.hpp"
 #include "x4sb/data/math.hpp"
 #include "x4sb/data/types.hpp"
 #include "x4sb/document/commands.hpp"
 #include "x4sb/document/station.hpp"
+#include "x4sb/editorcore/display_flip.hpp"
 #include "x4sb/snap/snap.hpp"
 
 #include <algorithm>
@@ -30,13 +33,12 @@ constexpr int kScreenH = 720;
 // Preferred test module: a 6-connector cross hub (all 6 meshes exist on disk).
 constexpr const char* kPreferredMacro = "struct_arg_cross_01_macro";
 
-// True if every meshRef of `def` resolves to an existing .gltf under `assetRoot`.
+// True if every meshRef of `def` has its lod0 XMF in the game archives.
 // A module with no meshRefs cannot be visually validated, so it counts as false.
-[[nodiscard]] bool allMeshesExist(const ModuleDef& def, const std::filesystem::path& assetRoot) {
+[[nodiscard]] bool allMeshesExist(const ModuleDef& def, const NativeAssets& native) {
   if (def.meshRefs.empty()) return false;
   for (const MeshRef& ref : def.meshRefs) {
-    std::error_code ec;
-    if (!std::filesystem::exists(assetRoot / ref.gltfPath, ec) || ec) return false;
+    if (!native.archive->contains(ref.xmfPath)) return false;
   }
   return true;
 }
@@ -44,10 +46,10 @@ constexpr const char* kPreferredMacro = "struct_arg_cross_01_macro";
 // Pick the cross hub if present + complete, else the first Connector-category
 // module with >=2 connection points whose meshes all exist. nullptr if none.
 [[nodiscard]] const ModuleDef* pickTestModule(const ModuleCatalog& catalog,
-                                              const std::filesystem::path& assetRoot) {
+                                              const NativeAssets& native) {
   if (const ModuleDef* preferred = catalog.find(kPreferredMacro);
       preferred != nullptr && preferred->connectionPoints.size() >= 2 &&
-      allMeshesExist(*preferred, assetRoot)) {
+      allMeshesExist(*preferred, native)) {
     return preferred;
   }
   // Deterministic fallback: scan modules in sorted id order so the choice is stable.
@@ -59,7 +61,7 @@ constexpr const char* kPreferredMacro = "struct_arg_cross_01_macro";
   for (const ModuleDef* def : defs) {
     if (def->category != Category::Connector) continue;
     if (def->connectionPoints.size() < 2) continue;
-    if (allMeshesExist(*def, assetRoot)) return def;
+    if (allMeshesExist(*def, native)) return def;
   }
   return nullptr;
 }
@@ -78,15 +80,17 @@ constexpr const char* kPreferredMacro = "struct_arg_cross_01_macro";
 // meshes vs. AABB boxes. A few warm-up frames precede the shot so the captured
 // framebuffer is clean.
 void renderAndCapture(const Station& station, const ModuleCatalog& catalog,
-                      const ::Camera3D& camera, MeshCache& meshes, bool showMeshes,
-                      const std::string& outPath) {
+                      const ::Camera3D& camera, MeshCache& meshes, FramePipeline& pipeline,
+                      bool showMeshes, const std::string& outPath) {
   for (int i = 0; i < 3; ++i) {
     BeginDrawing();
+    pipeline.begin();
     ClearBackground(::Color{30, 30, 38, 255});
     // allConnectors: this harness exists to eyeball the snap/handedness convention,
     // so show every module's connector markers + gizmo (the editor gates them).
     drawScene(station, catalog, camera, meshes, /*showGizmos=*/true, showMeshes,
               /*allConnectors=*/true);
+    pipeline.end();
     EndDrawing();
   }
   TakeScreenshot(outPath.c_str());  // captures the just-presented framebuffer
@@ -94,20 +98,10 @@ void renderAndCapture(const Station& station, const ModuleCatalog& catalog,
 
 }  // namespace
 
-int runSnapTest(const std::string& outPrefix) {
-  const std::optional<std::string> catalogPath = findCatalogJson();
-  if (!catalogPath) {
-    std::fprintf(stderr, "snaptest: could not find asset-cache/catalog.json\n");
-    return 1;
-  }
-  std::optional<ModuleCatalog> catalog = ModuleCatalog::loadFromFile(*catalogPath);
-  if (!catalog) {
-    std::fprintf(stderr, "snaptest: failed to load catalog %s\n", catalogPath->c_str());
-    return 1;
-  }
-  const std::filesystem::path assetRoot = std::filesystem::path(*catalogPath).parent_path();
+int runSnapTest(const NativeAssets& native, const std::string& outPrefix) {
+  const ModuleCatalog* catalog = &native.catalog;
 
-  const ModuleDef* def = pickTestModule(*catalog, assetRoot);
+  const ModuleDef* def = pickTestModule(*catalog, native);
   if (def == nullptr) {
     std::fprintf(stderr,
                  "snaptest: no suitable module (need %s or a Connector module with >=2 "
@@ -121,7 +115,8 @@ int runSnapTest(const std::string& outPrefix) {
   SetTargetFPS(60);
 
   {  // Inner scope: MeshCache destructs (UnloadModel) before CloseWindow below.
-    MeshCache meshes{assetRoot};
+    MeshCache meshes{native};
+    FramePipeline pipeline;
 
     // Build the station with the REAL command + snap APIs.
     Station station;
@@ -157,22 +152,20 @@ int runSnapTest(const std::string& outPrefix) {
       report += buf.data();
     }
 
-    // Fixed 3/4-angle camera framing the pair. The scene is rendered through a
-    // global rlScalef(1,1,-1), so the camera lives in display space — negate the
-    // target's Z (the geometry's Z axis is mirrored on screen).
+    // Fixed 3/4-angle camera framing the pair. The scene geometry has its Z
+    // flipped at load to display space, so the camera lives in display space — negate
+    // the target's Z (the geometry's Z axis is mirrored on screen).
     Vec3 midX4{0, 0, 0};
     for (const auto& pm : station.modules()) midX4 = midX4 + pm.worldTransform.position;
     midX4 = midX4 * (1.0 / static_cast<double>(station.modules().size()));
-    const ::Camera3D camera{
-        ::Vector3{900.0f, 700.0f, 900.0f},  // X4 units (~1.5 km out, 3/4 view)
-        ::Vector3{static_cast<float>(midX4.x), static_cast<float>(midX4.y),
-                  static_cast<float>(-midX4.z)},  // display-space target (flip Z)
-        ::Vector3{0.0f, 1.0f, 0.0f}, 45.0f, CAMERA_PERSPECTIVE};
+    const ::Camera3D camera{::Vector3{900.0f, 700.0f, 900.0f},  // X4 units (~1.5 km out, 3/4 view)
+                            toRl(flipZ(midX4)),                 // display-space target (flip Z)
+                            ::Vector3{0.0f, 1.0f, 0.0f}, 45.0f, CAMERA_PERSPECTIVE};
 
     const std::string meshPath = outPrefix + "_mesh.png";
     const std::string boxPath = outPrefix + "_box.png";
-    renderAndCapture(station, *catalog, camera, meshes, /*showMeshes=*/true, meshPath);
-    renderAndCapture(station, *catalog, camera, meshes, /*showMeshes=*/false, boxPath);
+    renderAndCapture(station, *catalog, camera, meshes, pipeline, /*showMeshes=*/true, meshPath);
+    renderAndCapture(station, *catalog, camera, meshes, pipeline, /*showMeshes=*/false, boxPath);
 
     // Report what was placed + where the screenshots went.
     std::array<char, 256> line{};

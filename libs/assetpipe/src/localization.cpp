@@ -5,20 +5,32 @@
 #include <cctype>
 #include <charconv>
 #include <cstddef>
+#include <limits>
 
 namespace x4sb {
 namespace {
 
-constexpr int kMaxDepth = 8;                         // breaks reference cycles
-constexpr std::uint64_t kPageStride = 1'000'000ULL;  // text ids are < 1e6 in X4
+constexpr int kMaxDepth = 8;  // breaks reference cycles
+// Measured against the real t/0001-l044.xml: text ids reach 9 digits (max
+// observed 306220103), with 23% of entries >= 1e6 (e.g. every DLC sector name
+// on page 20004). Stride 1e9 keeps page*stride+id <= ~3.1e13 (max page 30622),
+// far inside u64, while still isolating pages.
+constexpr std::uint64_t kPageStride = 1'000'000'000ULL;
 
 std::uint64_t makeKey(long page, long id) {
   return static_cast<std::uint64_t>(page) * kPageStride + static_cast<std::uint64_t>(id);
 }
 
 // A text id must stay below the page stride, else makeKey would alias it into
-// the next page's keyspace. The single guard for the page*stride+id key scheme.
+// the next page's keyspace.
 bool idInRange(long id) { return static_cast<std::uint64_t>(id) < kPageStride; }
+
+// A hostile page id big enough to wrap page*stride in u64 (possible where long
+// is 64-bit) would alias into a legit key; real pages top out at 5 digits.
+bool pageInRange(long page) {
+  constexpr std::uint64_t kMaxPage = std::numeric_limits<std::uint64_t>::max() / kPageStride;
+  return static_cast<std::uint64_t>(page) < kMaxPage;
+}
 
 // Parse a single non-negative integer that fills the whole view (no spaces/sign).
 bool parseInt(std::string_view s, long& out) {
@@ -37,7 +49,7 @@ bool parseRef(std::string_view ref, long& page, long& id) {
   if (comma == std::string_view::npos) return false;
   if (!parseInt(inner.substr(0, comma), page) || !parseInt(inner.substr(comma + 1), id))
     return false;
-  return idInRange(id);
+  return pageInRange(page) && idInRange(id);
 }
 
 // Collapse internal whitespace runs to one space and trim the ends.
@@ -68,6 +80,7 @@ void TextDatabase::merge(std::string_view l044Xml) {
   for (const pugi::xml_node page : root.children("page")) {
     long pageId = 0;
     if (!parseInt(page.attribute("id").value(), pageId)) continue;
+    if (!pageInRange(pageId)) continue;
     for (const pugi::xml_node t : page.children("t")) {
       long textId = 0;
       if (!parseInt(t.attribute("id").value(), textId)) continue;

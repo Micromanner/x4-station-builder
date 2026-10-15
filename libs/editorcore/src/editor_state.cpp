@@ -168,8 +168,14 @@ void EditorState::updateGhost(Vec3 rayOriginX4, Vec3 rayDirX4, bool forceFree) {
   // for the "feels 2D" problem — projecting onto a ground plane made vertical mouse
   // motion sweep the hit point near/far; a standoff moves the ghost up/down on
   // screen instead. The mouse ray's direction is unit length (GetScreenToWorldRay).
+  // Never closer than the module's own reach: a standoff captured while zoomed in
+  // put the eye inside a big module's hull, where back-face culling hid it entirely.
+  const Vec3 corner{std::max(std::abs(def->aabb.min.x), std::abs(def->aabb.max.x)),
+                    std::max(std::abs(def->aabb.min.y), std::abs(def->aabb.max.y)),
+                    std::max(std::abs(def->aabb.min.z), std::abs(def->aabb.max.z))};
+  constexpr double kReachStandoff = 2.5;  // keeps a 45-degree view around the whole module
   Transform xf;
-  xf.position = rayOriginX4 + rayDirX4 * placeDistance_;
+  xf.position = rayOriginX4 + rayDirX4 * std::max(placeDistance_, kReachStandoff * length(corner));
   xf.rotation = pendingRotation_;
   xf = clampToPlot(def->aabb, xf);
   const AABB worldBox = worldAabb(def->aabb, xf);

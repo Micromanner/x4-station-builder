@@ -40,7 +40,7 @@ struct CameraBasis {
 // World offset to add to the orbit target for a mouse delta of (dx, dy) pixels.
 // `scale` converts pixels->world at the pivot depth (caller supplies it via
 // pixelsToWorldAtDepth). Both axes pan the camera the way the cursor moves: drag
-// right (dx>0) slides the pivot -right, drag down (dy>0) slides it -up — so the
+// right (dx>0) slides the pivot -right, drag down (dy>0) slides it -up, so the
 // view tracks the drag, not the inverse.
 [[nodiscard]] inline Vec3 panOffset(const CameraBasis& b, double dx, double dy, double scale) {
   return b.right * (-dx * scale) + b.up * (-dy * scale);
@@ -105,7 +105,7 @@ struct ZoomResult {
 // pivot migrates toward it by the effective factor (newDistance/distance) so the
 // clamp can't drift the focus. Unlike zoomTowardCursor this takes the focal point
 // directly (the shell hit-tests the scene under the cursor), so passing focus ==
-// target yields a plain dolly with the pivot unchanged — the over-empty-space case,
+// target yields a plain dolly with the pivot unchanged (the over-empty-space case),
 // which avoids the cursor-ward pivot drift the ray-plane approximation produced.
 [[nodiscard]] inline ZoomResult zoomTowardPoint(Vec3 target, double distance, Vec3 focus, double k,
                                                 double minDistance, double maxDistance) {

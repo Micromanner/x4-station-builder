@@ -1,9 +1,13 @@
 #include "megashot.hpp"
 
-#include "app_paths.hpp"
+#include "bloom.hpp"
+#include "env_cubemap.hpp"
 #include "mesh_cache.hpp"
+#include "native_assets.hpp"
 #include "raylib.h"
 #include "render.hpp"
+#include "sky.hpp"
+#include "sun_shadow.hpp"
 #include "x4sb/data/catalog.hpp"
 #include "x4sb/data/math.hpp"
 #include "x4sb/editorcore/display_flip.hpp"
@@ -11,6 +15,7 @@
 
 #include <cmath>
 #include <cstdio>
+#include <cstdlib>
 #include <fstream>
 #include <optional>
 #include <sstream>
@@ -36,19 +41,34 @@ struct Shot {
 // Render `frames` frames (SetTargetFPS must be off so it runs uncapped), capture
 // the last, and return the mean render FPS — the perf signal for a view.
 double renderAndCapture(const Station& station, const ModuleCatalog& catalog,
-                        const ::Camera3D& camera, MeshCache& meshes, const std::string& outPath) {
+                        const ::Camera3D& camera, MeshCache& meshes, Sky& sky,
+                        FramePipeline& pipeline, SunShadow& shadow, const std::string& outPath) {
   constexpr int kFrames = 40;
   for (int i = 0; i < 3; ++i) {  // warm-up (mesh upload, shader) excluded from timing
     BeginDrawing();
+    shadow.render(station, catalog, meshes, sky.sun().dir, camera);
+    pipeline.begin();
     ClearBackground(::Color{30, 30, 38, 255});
-    drawScene(station, catalog, camera, meshes, /*showGizmos=*/true, /*showMeshes=*/true);
+    BeginMode3D(camera);
+    sky.draw(camera);
+    EndMode3D();
+    drawScene(station, catalog, camera, meshes, /*showGizmos=*/true, /*showMeshes=*/true,
+              /*allConnectors=*/false, /*lodEnabled=*/false, sky.sun());
+    pipeline.end();
     EndDrawing();
   }
   const double t0 = GetTime();
   for (int i = 0; i < kFrames; ++i) {
     BeginDrawing();
+    shadow.render(station, catalog, meshes, sky.sun().dir, camera);
+    pipeline.begin();
     ClearBackground(::Color{30, 30, 38, 255});
-    drawScene(station, catalog, camera, meshes, /*showGizmos=*/true, /*showMeshes=*/true);
+    BeginMode3D(camera);
+    sky.draw(camera);
+    EndMode3D();
+    drawScene(station, catalog, camera, meshes, /*showGizmos=*/true, /*showMeshes=*/true,
+              /*allConnectors=*/false, /*lodEnabled=*/false, sky.sun());
+    pipeline.end();
     EndDrawing();
   }
   const double dt = GetTime() - t0;
@@ -58,17 +78,9 @@ double renderAndCapture(const Station& station, const ModuleCatalog& catalog,
 
 }  // namespace
 
-int runMegaShot(const std::string& planPath, const std::string& outPrefix) {
-  const std::optional<std::string> catalogPath = findCatalogJson();
-  if (!catalogPath) {
-    std::fprintf(stderr, "megashot: could not find asset-cache/catalog.json\n");
-    return 1;
-  }
-  std::optional<ModuleCatalog> catalog = ModuleCatalog::loadFromFile(*catalogPath);
-  if (!catalog) {
-    std::fprintf(stderr, "megashot: failed to load catalog %s\n", catalogPath->c_str());
-    return 1;
-  }
+int runMegaShot(const NativeAssets& native, const std::string& planPath,
+                const std::string& outPrefix) {
+  const ModuleCatalog* catalog = &native.catalog;
   std::ifstream in(planPath, std::ios::binary);
   if (!in) {
     std::fprintf(stderr, "megashot: cannot open plan %s\n", planPath.c_str());
@@ -90,11 +102,25 @@ int runMegaShot(const std::string& planPath, const std::string& outPrefix) {
               bounds.box.max.x, bounds.box.max.y, bounds.box.max.z);
   std::printf("megashot: center=(%.0f,%.0f,%.0f) radius=%.0f\n", c.x, c.y, c.z, radius);
 
-  InitWindow(kScreenW, kScreenH, "X4 Station Builder - megashot");
+  // Env overrides so a live-editor report (window size, picked sky) can be
+  // reproduced through the same path: X4SB_SHOT_W/H, X4SB_SHOT_CLUSTER.
+  const auto envInt = [](const char* name, int fallback) {
+    const char* v = std::getenv(name);
+    const int parsed = v ? std::atoi(v) : 0;
+    return parsed >= 64 ? parsed : fallback;
+  };
+  const char* clusterEnv = std::getenv("X4SB_SHOT_CLUSTER");
+  InitWindow(envInt("X4SB_SHOT_W", kScreenW), envInt("X4SB_SHOT_H", kScreenH),
+             "X4 Station Builder - megashot");
   // No SetTargetFPS: leave the frame rate uncapped so renderAndCapture's timing
   // reflects real render cost, not a 60 Hz cap.
   {
-    MeshCache meshes{std::filesystem::path(*catalogPath).parent_path()};
+    MeshCache meshes{native};
+    Sky sky{native, clusterEnv ? std::string(clusterEnv) : std::string{}};
+    FramePipeline pipeline;
+    EnvCubemap envCube{sky};
+    meshes.setEnvMap(envCube.textureId(), envCube.maxLod());
+    SunShadow shadow;
 
     // Display-space target (the scene flips Z).
     const Vec3 dt = flipZ(c);
@@ -120,7 +146,7 @@ int runMegaShot(const std::string& planPath, const std::string& outPrefix) {
                               target, ::Vector3{0.0f, 1.0f, 0.0f}, 45.0f, CAMERA_PERSPECTIVE};
 
       const RenderStats st = lodStats(*station, *catalog, camera);
-      const double fps = renderAndCapture(*station, *catalog, camera, meshes,
+      const double fps = renderAndCapture(*station, *catalog, camera, meshes, sky, pipeline, shadow,
                                           outPrefix + "_" + shot.label + ".png");
       std::printf("megashot: [%-7s] dist=%.0f  total=%d culled=%d detailed=%d box=%d  fps=%.1f\n",
                   shot.label, dist, st.total, st.culled, st.drawnDetailed, st.drawnBox, fps);

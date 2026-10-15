@@ -18,6 +18,4 @@ std::optional<std::string> findAsset(const std::string& rel) {
   return std::nullopt;
 }
 
-std::optional<std::string> findCatalogJson() { return findAsset("asset-cache/catalog.json"); }
-
 }  // namespace x4sb::editor

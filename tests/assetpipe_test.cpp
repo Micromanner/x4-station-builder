@@ -151,12 +151,107 @@ TEST_CASE("moduleAabb ignores nocollision parts") {
   CHECK(box.max.z == doctest::Approx(100));
 }
 
+TEST_CASE("parseComponentGeometry and moduleAabb compose the connection parent chain") {
+  // Shaped like prod_gen_refinedmetals (synthetic, spec §12): lava in a container on
+  // a plate, the plate on an untagged helper part turned 90 degrees about Y.
+  const char* xml = R"(<?xml version="1.0"?>
+<components>
+  <component name="chain_test" class="production">
+    <source geometry="assets/test/chain_data"/>
+    <connections>
+      <connection name="c_pivot" tags="">
+        <offset>
+          <position x="100" y="0" z="0"/>
+          <quaternion qx="0" qy="0.7071068" qz="0" qw="0.7071068"/>
+        </offset>
+        <parts><part name="helper_pivot"/></parts>
+      </connection>
+      <connection name="c_plate" tags="part" parent="helper_pivot">
+        <offset><position x="10" y="0" z="0"/></offset>
+        <parts><part name="anim_plate01"><size><max x="1" y="1" z="1"/></size></part></parts>
+      </connection>
+      <connection name="c_lava" tags="part animation nocollision" parent="anim_plate01">
+        <offset><position x="0" y="-2" z="0"/></offset>
+        <parts><part name="anim_containerlava01"/></parts>
+      </connection>
+    </connections>
+  </component>
+</components>)";
+  const ComponentGeometry geo = parseComponentGeometry(xml);
+  REQUIRE(geo.parts.size() == 2);  // the helper's connection is not part-tagged
+  // +90 degrees about Y turns the plate's +X offset onto -Z.
+  const Transform& plate = geo.parts[0].offset;
+  CHECK(plate.position.x == doctest::Approx(100));
+  CHECK(plate.position.z == doctest::Approx(-10));
+  const Transform& lava = geo.parts[1].offset;
+  CHECK(lava.position.x == doctest::Approx(100));
+  CHECK(lava.position.y == doctest::Approx(-2));
+  CHECK(lava.position.z == doctest::Approx(-10));
+  CHECK(lava.rotation.y == doctest::Approx(0.7071068));
+
+  const AABB box = moduleAabb(xml);  // only the plate collides
+  CHECK(box.min.x == doctest::Approx(99));
+  CHECK(box.max.z == doctest::Approx(-9));
+}
+
+TEST_CASE("parseComponentGeometry shifts a part by its pivot inside the connection frame") {
+  const char* xml = R"(<?xml version="1.0"?>
+<components>
+  <component name="pivot_test" class="habitation">
+    <source geometry="assets/test/pivot_data"/>
+    <connections>
+      <connection name="c_detail" tags="part">
+        <offset><quaternion qx="0" qy="0.7071068" qz="0" qw="0.7071068"/></offset>
+        <parts>
+          <part name="detail_m_main">
+            <size><max x="1" y="1" z="1"/><center x="0" y="0" z="0"/></size>
+            <pivot><offset><position x="10" y="2" z="0"/></offset></pivot>
+          </part>
+        </parts>
+      </connection>
+    </connections>
+  </component>
+</components>)";
+  const ComponentGeometry geo = parseComponentGeometry(xml);
+  REQUIRE(geo.parts.size() == 1);
+  // +90 degrees about Y turns the pivot's +X onto -Z.
+  const Transform& t = geo.parts[0].offset;
+  CHECK(t.position.x == doctest::Approx(0).epsilon(1e-6));
+  CHECK(t.position.y == doctest::Approx(2));
+  CHECK(t.position.z == doctest::Approx(-10));
+
+  // <size> already includes the pivot, so the box stays at the connection origin.
+  const AABB box = moduleAabb(xml);
+  CHECK(box.min.y == doctest::Approx(-1));
+  CHECK(box.max.y == doctest::Approx(1));
+}
+
+TEST_CASE("partDetailClass reads the connection tag, else the part name prefix") {
+  CHECK(partDetailClass("part detail_xs nocollision forceoutline", "anim_fence_01") ==
+        DetailClass::XS);
+  CHECK(partDetailClass("part animation nocollision detail_xl forceoutline", "anim_door_01") ==
+        DetailClass::XL);
+  // The tag wins over a disagreeing name.
+  CHECK(partDetailClass("part detail_l", "detail_s_pipes") == DetailClass::L);
+  CHECK(partDetailClass("part nocollision", "detail_m_main") == DetailClass::M);
+  CHECK(partDetailClass("part nocollision", "detail_mast") == DetailClass::None);
+  CHECK(partDetailClass("part", "part_main") == DetailClass::None);
+}
+
 TEST_CASE("parseComponentGeometry reads the geometry folder and parts (good case unchanged)") {
   const ComponentGeometry geo = parseComponentGeometry(kComponentXml);
   // A normal single-slash path must pass through untouched.
   CHECK(geo.geometryFolder == "assets/test/test_cube_01_data");
   REQUIRE(geo.parts.size() == 1);
   CHECK(geo.parts[0].name == "part_main");
+}
+
+TEST_CASE("parseComponentGeometry captures the part size for extent checks") {
+  const ComponentGeometry geo = parseComponentGeometry(kComponentXml);
+  REQUIRE(geo.parts.size() == 1);
+  CHECK(geo.parts[0].sizeMax.x == doctest::Approx(10));
+  CHECK(geo.parts[0].sizeMax.y == doctest::Approx(20));
+  CHECK(geo.parts[0].sizeMax.z == doctest::Approx(30));
 }
 
 TEST_CASE("parseComponentGeometry normalizes a double-backslash / trailing-slash source path") {
@@ -253,16 +348,12 @@ TEST_CASE("parseComponentGeometry captures a part's xref and keeps the local nam
   CHECK(geo.parts[1].ref == "xref_bay.part_main");
 }
 
-TEST_CASE("partXmfPathLod builds the LOD-suffixed source path; partXmfPath stays lod0") {
-  CHECK(partXmfPathLod("g/f", "part_main", 0) == "g/f/part_main-lod0.xmf");
-  CHECK(partXmfPathLod("g/f", "part_main", 2) == "g/f/part_main-lod2.xmf");
+TEST_CASE("partXmfPath builds the lod0 source path") {
   CHECK(partXmfPath("g/f", "part_main") == "g/f/part_main-lod0.xmf");
 }
 
-TEST_CASE("parseComponentGeometry keeps only visual parts") {
-  // Mixed module: one hull part plus an fx decal and a collision box. Only the
-  // hull is renderable; the converter and catalog must see just that.
-  const char* xml = R"(<?xml version="1.0"?>
+namespace {
+const char* const kMixedPartsXml = R"(<?xml version="1.0"?>
 <components>
   <component name="mixed_01" class="production">
     <source geometry="g/mixed_data"/>
@@ -274,8 +365,21 @@ TEST_CASE("parseComponentGeometry keeps only visual parts") {
     </connections>
   </component>
 </components>)";
-  const ComponentGeometry geo = parseComponentGeometry(xml);
+}  // namespace
+
+TEST_CASE("parseComponentGeometry keeps only visual parts") {
+  const ComponentGeometry geo = parseComponentGeometry(kMixedPartsXml);
   REQUIRE(geo.parts.size() == 2);
   CHECK(geo.parts[0].name == "part_main");
   CHECK(geo.parts[1].name == "detail_s_main");
+}
+
+TEST_CASE("parseComponentGeometry withEffects keeps fx parts flagged, never helpers") {
+  const ComponentGeometry geo = parseComponentGeometry(kMixedPartsXml, /*withEffects=*/true);
+  REQUIRE(geo.parts.size() == 3);
+  CHECK(geo.parts[0].name == "part_main");
+  CHECK_FALSE(geo.parts[0].effect);
+  CHECK(geo.parts[1].name == "fx_decals");
+  CHECK(geo.parts[1].effect);
+  CHECK(geo.parts[2].name == "detail_s_main");
 }

@@ -62,7 +62,8 @@ void readout(const char* text) {
 
 float topBarHeight() { return kBarHeight; }
 
-TopBarAction topBar(const EditorState& state, double fps) {
+TopBarAction topBar(const EditorState& state, double fps, const SkyPickerState& sky,
+                    SkyPickerResult& skyOut) {
   TopBarAction clicked = TopBarAction::None;
 
   // static: Clay references these bytes until renderClayCommands runs AFTER this
@@ -87,6 +88,7 @@ TopBarAction topBar(const EditorState& state, double fps) {
     button("BtnUndo", "Undo", state.canUndo(), TopBarAction::Undo, clicked);
     button("BtnRedo", "Redo", state.canRedo(), TopBarAction::Redo, clicked);
     button("BtnShuffle", "Shuffle", true, TopBarAction::Shuffle, clicked);
+    skyPicker(sky, skyOut);
     // Spacer pushes the readouts toward the right.
     CLAY({.layout = {.sizing = {.width = CLAY_SIZING_GROW(0)}}}) {}
     readout("Plot: 20x20x20 km");

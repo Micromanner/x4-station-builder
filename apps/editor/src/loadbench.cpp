@@ -1,8 +1,9 @@
 #include "loadbench.hpp"
 
-#include "app_paths.hpp"
+#include "bloom.hpp"
 #include "mesh_cache.hpp"
 #include "mesh_load.hpp"
+#include "native_assets.hpp"
 #include "raylib.h"
 #include "render.hpp"
 #include "x4sb/data/catalog.hpp"
@@ -53,11 +54,13 @@ Station makeStation(const std::vector<std::string>& macros, int n) {
 }
 
 double meanFps(const Station& station, const ModuleCatalog& catalog, const ::Camera3D& cam,
-               MeshCache& meshes, bool lodEnabled, int frames) {
+               MeshCache& meshes, FramePipeline& pipeline, bool lodEnabled, int frames) {
   for (int i = 0; i < 3; ++i) {  // warm-up
     BeginDrawing();
+    pipeline.begin();
     ClearBackground(::Color{30, 30, 38, 255});
     drawScene(station, catalog, cam, meshes, false, true, false, lodEnabled);
+    pipeline.end();
     EndDrawing();
   }
   double sum = 0.0;
@@ -65,8 +68,10 @@ double meanFps(const Station& station, const ModuleCatalog& catalog, const ::Cam
   for (int i = 0; i < frames && !WindowShouldClose(); ++i) {
     const double t0 = GetTime();
     BeginDrawing();
+    pipeline.begin();
     ClearBackground(::Color{30, 30, 38, 255});
     drawScene(station, catalog, cam, meshes, false, true, false, lodEnabled);
+    pipeline.end();
     EndDrawing();
     sum += (GetTime() - t0) * 1000.0;
     ++n;
@@ -77,17 +82,8 @@ double meanFps(const Station& station, const ModuleCatalog& catalog, const ::Cam
 
 }  // namespace
 
-int runLoadBench(int modules) {
-  const std::optional<std::string> catalogPath = findCatalogJson();
-  if (!catalogPath) {
-    std::fprintf(stderr, "loadbench: could not find asset-cache/catalog.json\n");
-    return 1;
-  }
-  std::optional<ModuleCatalog> catalog = ModuleCatalog::loadFromFile(*catalogPath);
-  if (!catalog) {
-    std::fprintf(stderr, "loadbench: failed to load catalog\n");
-    return 1;
-  }
+int runLoadBench(const NativeAssets& native, int modules) {
+  const ModuleCatalog* catalog = &native.catalog;
   const std::vector<std::string> macros = meshfulMacros(*catalog);
   if (macros.empty()) {
     std::fprintf(stderr, "loadbench: no modules with meshes in catalog\n");
@@ -103,7 +99,8 @@ int runLoadBench(int modules) {
 
   InitWindow(kScreenW, kScreenH, "X4 Station Builder - loadbench");
   {
-    MeshCache meshes{std::filesystem::path(*catalogPath).parent_path()};
+    MeshCache meshes{native};
+    FramePipeline pipeline;
     const double t0 = GetTime();
     loadStationMeshes(station, *catalog, meshes);
     const double loadMs = (GetTime() - t0) * 1000.0;
@@ -126,8 +123,10 @@ int runLoadBench(int modules) {
     std::printf("loadbench: view = %d drawn (%d detailed / %d boxed at LOD), %d culled\n",
                 st.drawnDetailed + st.drawnBox, st.drawnDetailed, st.drawnBox, st.culled);
 
-    const double fpsLodOn = meanFps(station, *catalog, cam, meshes, /*lodEnabled=*/true, 40);
-    const double fpsLodOff = meanFps(station, *catalog, cam, meshes, /*lodEnabled=*/false, 40);
+    const double fpsLodOn =
+        meanFps(station, *catalog, cam, meshes, pipeline, /*lodEnabled=*/true, 40);
+    const double fpsLodOff =
+        meanFps(station, *catalog, cam, meshes, pipeline, /*lodEnabled=*/false, 40);
     std::printf("loadbench: FPS  LOD-on=%.0f  LOD-off(all meshes)=%.0f\n", fpsLodOn, fpsLodOff);
   }
   CloseWindow();

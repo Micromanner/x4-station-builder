@@ -6,7 +6,9 @@
 #include "x4sb/assetpipe/localization.hpp"
 #include "x4sb/assetpipe/moduleindex.hpp"
 #include "x4sb/assetpipe/wares.hpp"
+#include "x4sb/data/catalog.hpp"
 
+#include <algorithm>
 #include <optional>
 #include <unordered_map>
 #include <utility>
@@ -99,14 +101,20 @@ void forEachResolvedModule(const ExtractFn& extract, const std::vector<std::stri
       if (it == macroIdx.end()) return std::nullopt;
       return extract(it->second);
     };
+    rm.resolveComponentXml = [&compIdx,
+                              &extract](const std::string& name) -> std::optional<std::string> {
+      const auto it = compIdx.find(detail::toLower(name));
+      if (it == compIdx.end()) return std::nullopt;
+      return extract(it->second);
+    };
     visit(rm);
   }
 }
 
 }  // namespace detail
 
-std::string meshGltfPath(const std::string& moduleId, const std::string& partName) {
-  return "meshes/" + moduleId + "__" + partName + ".gltf";
+std::string meshKeyFor(const std::string& moduleId, const std::string& partName) {
+  return moduleId + "__" + partName;
 }
 
 CatalogBuildResult buildModuleCatalog(const ExtractFn& extract,
@@ -138,15 +146,60 @@ CatalogBuildResult buildModuleCatalog(const ExtractFn& extract,
         d.connectionPoints = snapConnectionPoints(rm.componentXml);
         d.aabb = moduleAabb(rm.componentXml);
 
-        const ComponentGeometry geo = parseComponentGeometry(rm.componentXml);
-        for (const ComponentPart& p : geo.parts) {
-          MeshRef mr;
-          mr.gltfPath = meshGltfPath(d.id, p.name);
-          mr.localTransform = p.offset;
-          d.meshRefs.push_back(std::move(mr));
-        }
+        // `owner` keys the meshes: a child macro's parts are shared by every host.
+        const auto addParts = [&d, &rm](const ComponentGeometry& geo, const std::string& owner,
+                                        const Transform& mount) {
+          for (const ComponentPart& p : geo.parts) {
+            MeshRef mr;
+            mr.meshKey = meshKeyFor(owner, p.name);
+            std::string folder = geo.geometryFolder;
+            std::string part = p.name;
+            if (const auto ref = parsePartRef(p.ref)) {
+              const auto resolved = rm.resolveComponentFolder(ref->component);
+              if (resolved) {
+                folder = *resolved;
+                part = ref->part;
+              }
+            }
+            if (!folder.empty()) mr.xmfPath = partXmfPath(folder, part);
+            mr.materialRef = p.materialRef;
+            mr.localTransform = compose(mount, p.offset);
+            mr.radius = length(p.sizeMax);
+            mr.uvAnimation = p.uvAnimation;
+            mr.detail = p.detail;
+            mr.effect = p.effect;
+            d.meshRefs.push_back(std::move(mr));
+          }
+        };
+        addParts(parseComponentGeometry(rm.componentXml, /*withEffects=*/true), d.id, Transform{});
         d.clearanceVolumes =
             extractClearanceVolumes(rm.macroXml, rm.componentXml, rm.resolveMacroXml);
+        d.lights = parseComponentLights(rm.componentXml);
+
+        // Docking bays (the landing pads and their lights) and rooms (the dock
+        // platforms, the Showroom floor) hang off the macro's connections as child
+        // macros, not parts of the module's own component.
+        const std::vector<ComponentConnection> mounts = parseComponentConnections(rm.componentXml);
+        for (const MacroChild& child : rm.macro->children) {
+          const std::optional<std::string> childMacroXml = rm.resolveMacroXml(child.macroRef);
+          if (!childMacroXml) continue;
+          const MacroInfo cmi = parseMacro(*childMacroXml);
+          if (cmi.className != "dockingbay" && cmi.className != "room") continue;
+          const auto mount =
+              std::find_if(mounts.begin(), mounts.end(), [&child](const ComponentConnection& c) {
+                return detail::toLower(c.name) == detail::toLower(child.connectionRef);
+              });
+          if (mount == mounts.end()) continue;
+          const std::optional<std::string> childXml = rm.resolveComponentXml(cmi.componentRef);
+          if (!childXml) continue;
+          addParts(parseComponentGeometry(*childXml, /*withEffects=*/true),
+                   detail::toLower(cmi.macroName.empty() ? child.macroRef : cmi.macroName),
+                   mount->offset);
+          for (LocalLight l : parseComponentLights(*childXml)) {
+            l.local = compose(mount->offset, l.local);
+            d.lights.push_back(l);
+          }
+        }
         res.modules.push_back(std::move(d));
       },
       res.skipped);

@@ -10,7 +10,7 @@ ModuleDef moduleWithMeshes(const std::string& id, const std::vector<std::string>
   d.id = id;
   for (const auto& p : paths) {
     MeshRef r;
-    r.gltfPath = p;
+    r.meshKey = p;
     d.meshRefs.push_back(r);
   }
   return d;
@@ -19,8 +19,8 @@ ModuleDef moduleWithMeshes(const std::string& id, const std::vector<std::string>
 
 TEST_CASE("meshPathsFor returns unique sorted mesh paths, collapsing repeated modules") {
   ModuleCatalog catalog;
-  catalog.add(moduleWithMeshes("A", {"b.gltf", "a.gltf"}));  // two parts
-  catalog.add(moduleWithMeshes("B", {"a.gltf", "c.gltf"}));  // shares a.gltf with A
+  catalog.add(moduleWithMeshes("A", {"b", "a"}));  // two parts
+  catalog.add(moduleWithMeshes("B", {"a", "c"}));  // shares a with A
 
   Station station;
   PlacedModule m1;
@@ -34,13 +34,13 @@ TEST_CASE("meshPathsFor returns unique sorted mesh paths, collapsing repeated mo
   station.add(m3);
 
   const std::vector<std::string> paths = meshPathsFor(station, catalog);
-  CHECK(paths == std::vector<std::string>{"a.gltf", "b.gltf", "c.gltf"});
+  CHECK(paths == std::vector<std::string>{"a", "b", "c"});
 }
 
 TEST_CASE("meshPathsFor skips missing defs and empty paths") {
   ModuleCatalog catalog;
-  ModuleDef a = moduleWithMeshes("A", {"a.gltf"});
-  a.meshRefs.push_back(MeshRef{});  // empty gltfPath -> ignored
+  ModuleDef a = moduleWithMeshes("A", {"a"});
+  a.meshRefs.push_back(MeshRef{});  // empty meshKey -> ignored
   catalog.add(a);
 
   Station station;
@@ -51,7 +51,7 @@ TEST_CASE("meshPathsFor skips missing defs and empty paths") {
   m2.defId = "MISSING";  // no such def -> contributes nothing
   station.add(m2);
 
-  CHECK(meshPathsFor(station, catalog) == std::vector<std::string>{"a.gltf"});
+  CHECK(meshPathsFor(station, catalog) == std::vector<std::string>{"a"});
 }
 
 TEST_CASE("meshPathsFor on an empty station is empty") {

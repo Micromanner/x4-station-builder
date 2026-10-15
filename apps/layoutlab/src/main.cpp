@@ -1,8 +1,10 @@
+#include "x4sb/assetpipe/metadata_cache.hpp"
 #include "x4sb/autolayout/autolayout.hpp"
 #include "x4sb/autolayout/report.hpp"
 #include "x4sb/data/catalog.hpp"
 #include "x4sb/document/station.hpp"
 #include "x4sb/planio/plan.hpp"
+#include "x4sb/platform/platform.hpp"
 
 #include <fstream>
 #include <iostream>
@@ -14,8 +16,6 @@
 namespace {
 
 using namespace x4sb;
-
-constexpr const char* kDefaultCatalog = "asset-cache/catalog.json";
 
 // The benchmark cart (user-specified): a realistic mid-size station that stresses connector
 // synthesis — 50 single-port hull-part modules plus peripherals (piers, dock, defense,
@@ -57,16 +57,18 @@ QuantityList parseCart(const std::string& spec) {
 
 void printUsage(const char* exe) {
   std::cout << "x4sb-layoutlab — auto-layout topology diagnostic\n\n"
-            << "Usage:\n  " << exe << " [--catalog <catalog.json>] [--cart id:n,id:n | --benchmark | --import-plan <plan.xml> [--export-plan <out.xml>]]"
+            << "Usage:\n  " << exe
+            << " [--x4 <X4 install>] [--cart id:n,id:n | --benchmark | --import-plan "
+               "<plan.xml> [--export-plan <out.xml>]]"
             << " [--no-modules] [--iters N] [--seed N] [--mode fishbone|organic]\n\n"
-            << "Defaults: --catalog " << kDefaultCatalog << ", --benchmark cart.\n";
+            << "Defaults: --x4 = the install saved by the editor, --benchmark cart.\n";
 }
 
 }  // namespace
 
 int main(int argc, char** argv) {
   std::vector<std::string> args(argv + 1, argv + argc);
-  std::string catalogPath = kDefaultCatalog;
+  std::string gameDirectory;
   std::string cartSpec;
   std::string importPlanPath;
   std::string exportPlanPath;
@@ -74,8 +76,8 @@ int main(int argc, char** argv) {
   AutoLayoutOptions opts;
 
   for (std::size_t i = 0; i < args.size(); ++i) {
-    if (args[i] == "--catalog" && i + 1 < args.size()) {
-      catalogPath = args[++i];
+    if (args[i] == "--x4" && i + 1 < args.size()) {
+      gameDirectory = args[++i];
     } else if (args[i] == "--cart" && i + 1 < args.size()) {
       cartSpec = args[++i];
     } else if (args[i] == "--benchmark") {
@@ -99,11 +101,20 @@ int main(int argc, char** argv) {
     }
   }
 
-  const std::optional<ModuleCatalog> catalog = ModuleCatalog::loadFromFile(catalogPath);
-  if (!catalog) {
-    std::cerr << "error: could not load catalog: " << catalogPath << "\n";
+  if (gameDirectory.empty())
+    gameDirectory = platform::loadGameDirectory(platform::settingsFilePath());
+  const auto cacheDirectory = platform::appCacheDir();
+  const auto install =
+      gameDirectory.empty()
+          ? std::nullopt
+          : loadInstallMetadata(gameDirectory, cacheDirectory.empty()
+                                                   ? cacheDirectory
+                                                   : cacheDirectory / "catalog.json");
+  if (!install) {
+    std::cerr << "error: could not load X4 game data (pass --x4 <install>)\n";
     return 1;
   }
+  const ModuleCatalog* catalog = &install->metadata.catalog;
 
   QuantityList cart;
   if (!importPlanPath.empty()) {
@@ -129,7 +140,7 @@ int main(int argc, char** argv) {
     cart = cartSpec.empty() ? benchmarkCart() : parseCart(cartSpec);
   }
 
-  std::cout << "catalog: " << catalogPath << " (" << catalog->size() << " modules)\n";
+  std::cout << "catalog: " << gameDirectory << " (" << catalog->size() << " modules)\n";
   std::cout << "cart (" << cart.size() << " distinct):\n";
   for (const auto& [id, count] : cart) {
     const ModuleDef* d = catalog->find(id);

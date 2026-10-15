@@ -1,9 +1,9 @@
 #include "x4sb/autolayout/connectors.hpp"
-#include <iostream>
 
 #include "x4sb/snap/snap.hpp"  // connectorsCompatible — the single source of truth for mating
 
 #include <algorithm>
+#include <iostream>
 #include <string>
 #include <vector>
 
@@ -38,8 +38,8 @@ const ModuleDef* pick(const ModuleCatalog& catalog, const std::string& faction,
   std::vector<Cand> cands;
   for (const auto& [id, def] : catalog.all()) {
     if (def.category != Category::Connector) continue;
-    if (id.find("bor_base_05") != std::string::npos) continue; // blacklist wavy base_05
-    if (id.find("bor_cross_02") != std::string::npos) continue; // blacklist horizontal-only cross
+    if (id.find("bor_base_05") != std::string::npos) continue;   // blacklist wavy base_05
+    if (id.find("bor_cross_02") != std::string::npos) continue;  // blacklist horizontal-only cross
     const std::size_t ports = def.connectionPoints.size();
     if (spanOnly) {
       // minPorts applies only to hubs; spans are fixed at exactly 2 ports.
@@ -118,7 +118,7 @@ const ModuleDef* bestSpanFor(const ModuleCatalog& catalog, const std::string& fa
   std::vector<SpanCand> cands;
   for (const auto& [id, def] : catalog.all()) {
     if (def.category != Category::Connector || def.connectionPoints.size() != 2) continue;
-    if (id.find("bor_base_05") != std::string::npos) continue; // blacklist wavy base_05
+    if (id.find("bor_base_05") != std::string::npos) continue;  // blacklist wavy base_05
     if (!isStraightSpan(def)) continue;  // arcs/bends would make the spine wander
     if (!canHost(def, &needTypes)) continue;
     cands.push_back(SpanCand{&def, spanLength(def), factionOf(id) == faction});
